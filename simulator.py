@@ -66,25 +66,25 @@ class Simulation:
 
         user_df = pd.DataFrame([{
             "name": user.name,
-            "peak_hours": user.peak_hours,
+            "peak_hour": user.peak_hours,
             "user_type": user.user_type,
-            "peak_hours": user.peak_hours
+            "peak_probability": user.peak_probability
         } for user in self.users])
 
-        if os.path.exists("user_data.csv"):
+        if os.path.exists("data/user_data.csv"):
             all_users = pd.read_csv("user_data.csv")
             all_users = pd.concat([all_users, user_df], ignore_index=True)
         else:
             all_users = user_df
 
-        all_users.to_csv("user_data.csv", index=False)
+        all_users.to_csv("data/user_data.csv", index=False)
 
     def load_user_data(self):
         """
         Loads the user's data from a CSV file
         """
 
-        return pd.read_csv("user_data.csv")
+        return pd.read_csv("data/user_data.csv")
 
 
 
