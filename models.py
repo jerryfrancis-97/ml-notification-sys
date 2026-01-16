@@ -185,7 +185,8 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name):
     # Create experiment folder with timestamp
     mlflow.set_experiment(experiment_name)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    with mlflow.start_run(run_name=f"run_{timestamp}"):
+    run_name = f"run_{timestamp}"
+    with mlflow.start_run(run_name=run_name):
         mlflow.log_param("hyperparams", hyperparams)
         mlflow.log_param("data_path", data_path)
         # mlflow.log_param("experiment_name", experiment_name)
@@ -222,7 +223,7 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name):
         # Train model
         model = model_class(**hyperparams)
         model.fit(X_train_scaled, y_train)
-        mlflow.sklearn.log_model(sk_model=model, name=f"{model_class.__name__}_{run_name}")
+        mlflow.sklearn.log_model(sk_model=model, name=run_name)
         
         # Plot learning curve (uses cross-validation on training data)
         print("\nGenerating learning curve...")
