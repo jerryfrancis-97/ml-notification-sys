@@ -21,6 +21,10 @@ def load_model_from_mlflow(experiment_name, run_id=None, model_name=None):
             order_by=["start_time DESC"],
             max_results=1
         )
+        print(f"Runs found in experiment '{experiment_name}':")
+        for run in runs:
+            print(run.info.run_id)
+
         if not runs:
             raise ValueError(f"No runs found in experiment '{experiment_name}'")
         run = runs[0]
@@ -253,10 +257,9 @@ def decide_notification(model, scaler, user_id, feature_store,
     }
 
 
-# ============ Main: Load from MLflow and Run Decisions ============
 
 if __name__ == "__main__":
-    from sklearn.preprocessing import StandardScaler
+
     from models import load_data, get_feature_columns, time_based_split
     
     print("="*60)
