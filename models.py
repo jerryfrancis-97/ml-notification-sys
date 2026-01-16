@@ -4,9 +4,14 @@ import json
 from datetime import datetime
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score, 
+    confusion_matrix, precision_recall_curve, roc_curve, auc
+)
+from sklearn.model_selection import learning_curve
 import matplotlib.pyplot as plt
 import seaborn as sns
+import numpy as np
 import mlflow
 from dotenv import load_dotenv
 
@@ -79,6 +84,88 @@ def plot_confusion_matrix(y_true, y_pred, save_path, split_name=""):
     print(f"Confusion matrix saved to {save_path}")
 
 
+def plot_learning_curve(model, X, y, save_path, cv=5):
+    """Plot learning curve showing train/validation scores vs training size"""
+    train_sizes, train_scores, valid_scores = learning_curve(
+        model, X, y, 
+        train_sizes=np.linspace(0.1, 1.0, 10),
+        cv=cv,
+        scoring='f1',
+        n_jobs=-1
+    )
+    
+    train_mean = np.mean(train_scores, axis=1)
+    train_std = np.std(train_scores, axis=1)
+    valid_mean = np.mean(valid_scores, axis=1)
+    valid_std = np.std(valid_scores, axis=1)
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_sizes, train_mean, 'o-', color='blue', label='Training Score')
+    plt.fill_between(train_sizes, train_mean - train_std, train_mean + train_std, 
+                     alpha=0.1, color='blue')
+    plt.plot(train_sizes, valid_mean, 'o-', color='orange', label='Cross-Validation Score')
+    plt.fill_between(train_sizes, valid_mean - valid_std, valid_mean + valid_std, 
+                     alpha=0.1, color='orange')
+    
+    plt.xlabel('Training Set Size')
+    plt.ylabel('F1 Score')
+    plt.title('Learning Curve')
+    plt.legend(loc='lower right')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    
+    print(f"Learning curve saved to {save_path}")
+
+
+def plot_pr_curve(y_true, y_proba, save_path, split_name=""):
+    """Plot Precision-Recall curve"""
+    precision, recall, thresholds = precision_recall_curve(y_true, y_proba)
+    pr_auc = auc(recall, precision)
+    
+    plt.figure(figsize=(8, 6))
+    plt.plot(recall, precision, color='blue', lw=2, label=f'PR Curve (AUC = {pr_auc:.3f})')
+    plt.fill_between(recall, precision, alpha=0.2, color='blue')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title(f'Precision-Recall Curve - {split_name}')
+    plt.legend(loc='lower left')
+    plt.grid(True)
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    
+    print(f"PR curve saved to {save_path}")
+    return pr_auc
+
+
+def plot_roc_curve(y_true, y_proba, save_path, split_name=""):
+    """Plot ROC curve"""
+    fpr, tpr, thresholds = roc_curve(y_true, y_proba)
+    roc_auc = auc(fpr, tpr)
+    
+    plt.figure(figsize=(8, 6))
+    plt.plot(fpr, tpr, color='blue', lw=2, label=f'ROC Curve (AUC = {roc_auc:.3f})')
+    plt.plot([0, 1], [0, 1], color='gray', lw=1, linestyle='--', label='Random')
+    plt.fill_between(fpr, tpr, alpha=0.2, color='blue')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title(f'ROC Curve - {split_name}')
+    plt.legend(loc='lower right')
+    plt.grid(True)
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    
+    print(f"ROC curve saved to {save_path}")
+    return roc_auc
+
+
 # ============ Experiment Setup ============
 
 def run_experiment(data_path, model_class, hyperparams, experiment_name):
@@ -97,12 +184,12 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name):
     """
     # Create experiment folder with timestamp
     mlflow.set_experiment(experiment_name)
-    with mlflow.start_run():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    with mlflow.start_run(run_name=f"run_{timestamp}"):
         mlflow.log_param("hyperparams", hyperparams)
         mlflow.log_param("data_path", data_path)
-        mlflow.log_param("experiment_name", experiment_name)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        exp_folder = f"experiments/{experiment_name}"
+        # mlflow.log_param("experiment_name", experiment_name)
+        exp_folder = f"experiments/{experiment_name}/{timestamp}"
         os.makedirs(exp_folder, exist_ok=True)
         
         print(f"\n{'='*50}")
@@ -135,9 +222,17 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name):
         # Train model
         model = model_class(**hyperparams)
         model.fit(X_train_scaled, y_train)
-        mlflow.sklearn.log_model(sk_model=model, name=f"{model_class.__name__}_{experiment_name}")
+        mlflow.sklearn.log_model(sk_model=model, name=f"{model_class.__name__}_{run_name}")
+        
+        # Plot learning curve (uses cross-validation on training data)
+        print("\nGenerating learning curve...")
+        plot_learning_curve(model, X_train_scaled, y_train, 
+                           f"{exp_folder}/learning_curve.png", cv=5)
+        mlflow.log_artifact(f"{exp_folder}/learning_curve.png")
+        
         # Evaluate on training set
         y_train_pred = model.predict(X_train_scaled)
+        y_train_proba = model.predict_proba(X_train_scaled)[:, 1]
         train_metrics = evaluate_model(y_train, y_train_pred, "Training")
         mlflow.log_metric("train_accuracy", train_metrics["accuracy"])
         mlflow.log_metric("train_precision", train_metrics["precision"])
@@ -147,12 +242,35 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name):
                             f"{exp_folder}/confusion_matrix_train.png", "Training")
         mlflow.log_artifact(f"{exp_folder}/confusion_matrix_train.png")
         
+        # PR and ROC curves for training
+        train_pr_auc_score = plot_pr_curve(y_train, y_train_proba, 
+                                     f"{exp_folder}/pr_curve_train.png", "Training")
+        mlflow.log_artifact(f"{exp_folder}/pr_curve_train.png")
+        mlflow.log_metric("train_pr_auc", train_pr_auc_score)
+        
+        train_roc_auc_score = plot_roc_curve(y_train, y_train_proba, 
+                                       f"{exp_folder}/roc_curve_train.png", "Training")
+        mlflow.log_artifact(f"{exp_folder}/roc_curve_train.png")
+        mlflow.log_metric("train_roc_auc", train_roc_auc_score)
+        
         # Evaluate on validation set
         y_valid_pred = model.predict(X_valid_scaled)
+        y_valid_proba = model.predict_proba(X_valid_scaled)[:, 1]
         valid_metrics = evaluate_model(y_valid, y_valid_pred, "Validation")
         plot_confusion_matrix(y_valid, y_valid_pred, 
                             f"{exp_folder}/confusion_matrix_valid.png", "Validation")
         mlflow.log_artifact(f"{exp_folder}/confusion_matrix_valid.png")
+        
+        # PR and ROC curves for validation
+        valid_pr_auc = plot_pr_curve(y_valid, y_valid_proba, 
+                                     f"{exp_folder}/pr_curve_valid.png", "Validation")
+        mlflow.log_artifact(f"{exp_folder}/pr_curve_valid.png")
+        mlflow.log_metric("valid_pr_auc", valid_pr_auc)
+        
+        valid_roc_auc = plot_roc_curve(y_valid, y_valid_proba, 
+                                       f"{exp_folder}/roc_curve_valid.png", "Validation")
+        mlflow.log_artifact(f"{exp_folder}/roc_curve_valid.png")
+        mlflow.log_metric("valid_roc_auc", valid_roc_auc)
         # Save coefficients (if model has them)
         if hasattr(model, 'coef_'):
             coefficients_df = pd.DataFrame({
@@ -186,17 +304,10 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name):
         
         with open(f"{exp_folder}/experiment_results.json", 'w') as f:
             json.dump(experiment_results, f, indent=2)
+        mlflow.log_artifact(f"{exp_folder}/experiment_results.json")
         
         print(f"\nExperiment results saved to {exp_folder}/experiment_results.json")
         
-        return {
-            "train_metrics": train_metrics,
-            "valid_metrics": valid_metrics,
-            "exp_folder": exp_folder,
-            "model": model,
-            "scaler": scaler
-        }
-
 
 # ============ Main ============
 
@@ -204,7 +315,7 @@ if __name__ == "__main__":
     
     # Define experiment config
     data_path = "data/training_data_features_imputed.csv"
-    experiment_name = f"logistic_regression_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    experiment_name = "notification_logreg"
 
     hyperparams = {
         "penalty": None,
