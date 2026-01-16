@@ -1,8 +1,59 @@
-
-
 import numpy as np
 from datetime import datetime
 import joblib
+import mlflow
+from mlflow.tracking import MlflowClient
+
+
+def load_model_from_mlflow(experiment_name, run_id=None, model_name=None):
+    client = MlflowClient()
+    
+    # Get experiment by name
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        raise ValueError(f"Experiment '{experiment_name}' not found")
+    
+    # Get run - either specific run_id or latest
+    if run_id is None:
+        # Get the latest run from the experiment
+        runs = client.search_runs(
+            experiment_ids=[experiment.experiment_id],
+            order_by=["start_time DESC"],
+            max_results=1
+        )
+        if not runs:
+            raise ValueError(f"No runs found in experiment '{experiment_name}'")
+        run = runs[0]
+        run_id = run.info.run_id
+    else:
+        run = client.get_run(run_id)
+    
+    # Load the model
+    model_uri = f"runs:/{run_id}/model"
+    
+    # Try to load as sklearn model
+    try:
+        model = mlflow.sklearn.load_model(model_uri)
+    except Exception:
+        # Fallback: search for model artifacts
+        artifacts = client.list_artifacts(run_id)
+        model_artifacts = [a for a in artifacts if 'model' in a.path.lower()]
+        if model_artifacts:
+            model_uri = f"runs:/{run_id}/{model_artifacts[0].path}"
+            model = mlflow.sklearn.load_model(model_uri)
+        else:
+            raise ValueError(f"Could not find model in run {run_id}")
+    
+    print(f"Loaded model from experiment: {experiment_name}")
+    print(f"Run ID: {run_id}")
+    print(f"Run name: {run.info.run_name}")
+    
+    return {
+        "model": model,
+        "run_id": run_id,
+        "run_name": run.info.run_name,
+        "experiment_name": experiment_name
+    }
 
 
 # ============ Mock Feature Store ============
