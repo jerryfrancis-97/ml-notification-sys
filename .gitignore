@@ -1,3 +1,8 @@
 data/
 logs/
 gx/
+mlruns/
+experiments/
+.env
+mlflow.db
+__pycache__/*
