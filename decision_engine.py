@@ -225,3 +225,37 @@ def decide_notification(model, scaler, user_id, feature_store,
     }
 
 
+# ============ Main: Load from MLflow and Run Decisions ============
+
+if __name__ == "__main__":
+    from sklearn.preprocessing import StandardScaler
+    from models import load_data, get_feature_columns, time_based_split
+    
+    print("="*60)
+    print("Notification Decision Engine")
+    print("="*60)
+    
+    # Load model from MLflow
+    print("\nLoading model from MLflow...")
+    try:
+        result = load_model_from_mlflow("notification_logreg")
+        model = result["model"]
+        print(f"Model loaded successfully!")
+    except Exception as e:
+        raise Exception(f"Could not load from MLflow: {e}")
+
+    
+
+    print("Running decisions for all users:")
+    print("="*60)
+    
+    for user_id in FEATURE_STORE.keys():
+        decision = decide_notification(model, scaler, user_id, FEATURE_STORE)
+        
+        print(f"\nUser: {user_id}")
+        print(f"  Send: {decision['send']}")
+        print(f"  Best Hour: {decision['hour']}")
+        print(f"  Probability: {decision['probability']:.3f}")
+        print(f"  Reason: {decision['reason']}")
+        print(f"  Details: {decision['details']}")
+
