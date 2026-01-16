@@ -44,7 +44,7 @@ class FeatureEngineering:
 
         open = x["opened"].cumsum()
         send = x.cumcount()
-        merge_df["user_open_rate"] = open.shift(1) / send.shift(1)
+        merge_df["user_open_rate"] = open.shift(1) / send.shift(1).replace(0, np.nan)
 
         return merge_df
 
@@ -57,6 +57,14 @@ class FeatureEngineering:
         merge_df["user_hour_open_rate"] = open.shift(1) / send.shift(1).replace(0, np.nan)
 
         return merge_df
+
+    def calc_hour_cyclical(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Encode hour as cyclical features using sin/cos transformation
+        """
+        df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
+        df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
+        return df
 
 
 def feature_engineering_pipeline(df: pd.DataFrame) -> pd.DataFrame:
@@ -76,6 +84,7 @@ def feature_engineering_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     df = feature_engineering.calc_delay_since_last_open_notification(df.copy())
     df = feature_engineering.calc_user_open_rate(df.copy())
     df = feature_engineering.calc_user_hour_open_rate(df.copy())
+    df = feature_engineering.calc_hour_cyclical(df.copy())
 
     return df
 
@@ -87,7 +96,10 @@ def apply_feature_engineering():
     path_to_data_features = "data/training_data_features.csv"
     df = pd.read_csv(path_to_data)
     df = feature_engineering_pipeline(df)
-    df.to_csv(path_to_data_features, index=False)
+    # df.to_csv(path_to_data_features, index=False)
+    return df
 
 if __name__ == "__main__":
-    apply_feature_engineering()
+    df = apply_feature_engineering()
+    print(df.isna().sum())
+    print(len(df))
