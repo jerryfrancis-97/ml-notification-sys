@@ -325,7 +325,7 @@ if __name__ == "__main__":
     }
     
     # Run experiment
-    results = run_experiment(
+    run_experiment(
         data_path=data_path,
         model_class=LogisticRegression,
         hyperparams=hyperparams,
@@ -334,4 +334,4 @@ if __name__ == "__main__":
     
     print("\n" + "="*50)
     print("Experiment Complete!")
-    print(f"Results saved to: {results['exp_folder']}")
+    print(f"Results saved to: experiments/{experiment_name}/{timestamp}")
