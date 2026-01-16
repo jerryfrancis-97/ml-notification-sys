@@ -12,6 +12,14 @@ Sending notifications at the wrong time leads to:
 This system uses ML (conditional probability estimation) to predict when each user is most likely to engage with a notification.
 So, P(open | given_hour, user_features) is the best time to send notification to a given user.
 
+We built a simulator to prepare user behavirour logs for N users based on differnt type (early bird, night owl, regular, sporadic) and added values for fatigue for number of notiifications.
+Currently using data from 100 users over a span of 30 days (where 1 notification was sent per day)
+
+Used
+- MLFlow Model Registry, Tracking for experiment steup
+- Great expectations for data quality checks
+
+
 
 ## Setup
 
