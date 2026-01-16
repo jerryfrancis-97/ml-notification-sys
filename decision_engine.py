@@ -179,22 +179,44 @@ def select_best_hour(model, scaler, user_id, feature_store, candidate_hours=None
 
 
 
+def apply_guardrails(user_id, probability, feature_store, 
+                     min_probability=0.15, max_notifications_per_day=2):
+    """
+    Apply guardrails to determine if notification should be sent.
+    """
+    user_features = get_user_features(user_id, feature_store)
+    
+    if user_features is None:
+        return {"should_send": False, "reason": "USER_NOT_FOUND", "details": "User not found"}
+    
+    # Check 1: Minimum probability threshold
+    if probability < min_probability:
+        return {
+            "should_send": False,
+            "reason": "LOW_PROBABILITY",
+            "details": f"Probability {probability:.3f} < threshold {min_probability}"
+        }
+    
+    # Check 2: Maximum notifications per day
+    notifications_sent_today = user_features.get("notifications_sent_today", 0)
+    if notifications_sent_today >= max_notifications_per_day:
+        return {
+            "should_send": False,
+            "reason": "MAX_NOTIFICATIONS_REACHED",
+            "details": f"Already sent {notifications_sent_today} notifications today"
+        }
+    
+    return {
+        "should_send": True,
+        "reason": "OK",
+        "details": f"Probability: {probability:.3f}, Notifications today: {notifications_sent_today}"
+    }
+
+
 def decide_notification(model, scaler, user_id, feature_store, 
                         candidate_hours=None, min_probability=0.15, max_notifications_per_day=2):
     """
     Main decision function that combines hour selection with guardrails.
-    
-    Args:
-        model: Trained sklearn model
-        scaler: Fitted StandardScaler
-        user_id: User identifier
-        feature_store: Dictionary containing user features
-        candidate_hours: List of hours to consider (default: 7-22)
-        min_probability: Minimum required probability (default: 0.15)
-        max_notifications_per_day: Max notifications per day (default: 2)
-    
-    Returns:
-        dict with complete decision information
     """
     # Step 1: Select best hour
     selection = select_best_hour(model, scaler, user_id, feature_store, candidate_hours)
@@ -212,7 +234,13 @@ def decide_notification(model, scaler, user_id, feature_store,
     
     best_hour = selection["best_hour"]
     probability = selection["probability"]
-
+    
+    # Step 2: Apply guardrails
+    guardrail_result = apply_guardrails(
+        user_id, probability, feature_store,
+        min_probability=min_probability,
+        max_notifications_per_day=max_notifications_per_day
+    )
     
     return {
         "user_id": user_id,
