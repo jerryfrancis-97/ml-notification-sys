@@ -16,7 +16,7 @@ We built a simulator to prepare user behavirour logs for N users based on differ
 Currently using data from 100 users over a span of 30 days (where 1 notification was sent per day)
 
 Used
-- MLFlow Model Registry, Tracking for experiment steup
+- MLFlow Model Registry, Tracking and Serving for experiment steup (Local Self hosting setup)
 - Great expectations for data quality checks
 
 
