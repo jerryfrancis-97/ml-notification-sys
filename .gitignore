@@ -6,3 +6,4 @@ experiments/
 .env
 mlflow.db
 __pycache__/*
+mlartifacts/
