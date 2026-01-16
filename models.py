@@ -122,28 +122,83 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name=None):
     X_test_scaled = scaler.transform(X_test)
     
     # Train model
-    max_iterations = 1000
-    model = LogisticRegression(penalty=None, max_iter=max_iterations, class_weight="balanced")
+    model = model_class(**hyperparams)
     model.fit(X_train_scaled, y_train)
     
     # Evaluate on training set
     y_train_pred = model.predict(X_train_scaled)
     train_metrics = evaluate_model(y_train, y_train_pred, "Training")
-    print("Training metrics:", train_metrics)
+    plot_confusion_matrix(y_train, y_train_pred, 
+                          f"{exp_folder}/confusion_matrix_train.png", "Training")
+    
     # Evaluate on validation set
     y_valid_pred = model.predict(X_valid_scaled)
     valid_metrics = evaluate_model(y_valid, y_valid_pred, "Validation")
-    print("Validation metrics:", valid_metrics)
-    # Save feature coefficients for interpretation
-    os.makedirs("experiments/logistic_regression", exist_ok=True)
-    coefficients_df = pd.DataFrame({
-        "feature": features,
-        "coefficient": model.coef_[0]
-    })
-    coefficients_df = coefficients_df.sort_values("coefficient", key=abs, ascending=False)
-    coefficients_df.to_csv(f"experiments/logistic_regression/model_coefficients_{max_iterations}.csv", index=False)
+    plot_confusion_matrix(y_valid, y_valid_pred, 
+                          f"{exp_folder}/confusion_matrix_valid.png", "Validation")
+    
+    # Save coefficients (if model has them)
+    if hasattr(model, 'coef_'):
+        coefficients_df = pd.DataFrame({
+            "feature": features,
+            "coefficient": model.coef_[0]
+        })
+        coefficients_df = coefficients_df.sort_values("coefficient", key=abs, ascending=False)
+        coefficients_df.to_csv(f"{exp_folder}/coefficients.csv", index=False)
+        
+        print("\nFeature Coefficients (sorted by importance):")
+        print(coefficients_df.to_string(index=False))
+    
+    # Save experiment config and results
+    experiment_results = {
+        "experiment_name": experiment_name,
+        "timestamp": timestamp,
+        "data_path": data_path,
+        "hyperparams": hyperparams,
+        "features": features,
+        "data_splits": {
+            "train": len(train),
+            "valid": len(valid),
+            "test": len(test)
+        },
+        "train_metrics": train_metrics,
+        "valid_metrics": valid_metrics
+    }
+    
+    with open(f"{exp_folder}/experiment_results.json", 'w') as f:
+        json.dump(experiment_results, f, indent=2)
+    
+    print(f"\nExperiment results saved to {exp_folder}/experiment_results.json")
+    
+    return {
+        "train_metrics": train_metrics,
+        "valid_metrics": valid_metrics,
+        "exp_folder": exp_folder,
+        "model": model,
+        "scaler": scaler
+    }
+
+
+# ============ Main ============
+
+if __name__ == "__main__":
+    # Define experiment config
+    data_path = "data/training_data_features_imputed.csv"
+    
+    hyperparams = {
+        "penalty": None,
+        "max_iter": 1000,
+        "class_weight": "balanced"
+    }
+    
+    # Run experiment
+    results = run_experiment(
+        data_path=data_path,
+        model_class=LogisticRegression,
+        hyperparams=hyperparams,
+        experiment_name="logistic_regression"
+    )
     
     print("\n" + "="*50)
-    print("Feature Coefficients (sorted by importance):")
-    print(coefficients_df.to_string(index=False))
-    print(f"\nCoefficients saved to experiments/logistic_regression/model_coefficients_{max_iterations}.csv")
+    print("Experiment Complete!")
+    print(f"Results saved to: {results['exp_folder']}")
