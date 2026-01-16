@@ -5,58 +5,52 @@ import mlflow
 from mlflow.tracking import MlflowClient
 
 
-def load_model_from_mlflow(experiment_name, run_id=None, model_name=None):
+def load_model_from_registry(model_name="baseline_model", version=None, stage=None):
+    """
+    Load model from MLflow Model Registry by name.
+    
+    Args:
+        model_name: Name of registered model (default: "baseline_model")
+        version: Specific version number (if None, uses latest or stage)
+        stage: Model stage like "Production", "Staging" (optional)
+    
+    Returns:
+        dict with model and metadata
+    """
     client = MlflowClient()
     
-    # Get experiment by name
-    experiment = client.get_experiment_by_name(experiment_name)
-    if experiment is None:
-        raise ValueError(f"Experiment '{experiment_name}' not found")
-    
-    # Get run - either specific run_id or latest
-    if run_id is None:
-        # Get the latest run from the experiment
-        runs = client.search_runs(
-            experiment_ids=[experiment.experiment_id],
-            order_by=["start_time DESC"],
-            max_results=1
-        )
-        print(f"Runs found in experiment '{experiment_name}':")
-        for run in runs:
-            print(run.info.run_id)
-
-        if not runs:
-            raise ValueError(f"No runs found in experiment '{experiment_name}'")
-        run = runs[0]
-        run_id = run.info.run_id
+    # Build model URI
+    if version is not None:
+        model_uri = f"models:/{model_name}/{version}"
+        print(f"Loading model '{model_name}' version {version}")
+    elif stage is not None:
+        model_uri = f"models:/{model_name}/{stage}"
+        print(f"Loading model '{model_name}' stage '{stage}'")
     else:
-        run = client.get_run(run_id)
+        # Get latest version
+        model_uri = f"models:/{model_name}/latest"
+        print(f"Loading latest version of model '{model_name}'")
     
     # Load the model
-    model_uri = f"runs:/{run_id}/model"
+    model = mlflow.sklearn.load_model(model_uri)
     
-    # Try to load as sklearn model
+    # Get model info
     try:
-        model = mlflow.sklearn.load_model(model_uri)
-    except Exception:
-        # Fallback: search for model artifacts
-        artifacts = client.list_artifacts(run_id)
-        model_artifacts = [a for a in artifacts if 'model' in a.path.lower()]
-        if model_artifacts:
-            model_uri = f"runs:/{run_id}/{model_artifacts[0].path}"
-            model = mlflow.sklearn.load_model(model_uri)
-        else:
-            raise ValueError(f"Could not find model in run {run_id}")
-    
-    print(f"Loaded model from experiment: {experiment_name}")
-    print(f"Run ID: {run_id}")
-    print(f"Run name: {run.info.run_name}")
+        model_info = client.get_registered_model(model_name)
+        latest_version = model_info.latest_versions[0] if model_info.latest_versions else None
+        print(f"Model loaded successfully!")
+        if latest_version:
+            print(f"  Version: {latest_version.version}")
+            print(f"  Run ID: {latest_version.run_id}")
+    except Exception as e:
+        print(f"Model loaded (could not fetch metadata: {e})")
+        latest_version = None
     
     return {
         "model": model,
-        "run_id": run_id,
-        "run_name": run.info.run_name,
-        "experiment_name": experiment_name
+        "model_name": model_name,
+        "version": latest_version.version if latest_version else None,
+        "run_id": latest_version.run_id if latest_version else None
     }
 
 
@@ -260,24 +254,31 @@ def decide_notification(model, scaler, user_id, feature_store,
 
 if __name__ == "__main__":
 
+    from sklearn.preprocessing import StandardScaler
     from models import load_data, get_feature_columns, time_based_split
     
     print("="*60)
     print("Notification Decision Engine")
     print("="*60)
     
-    # Load model from MLflow
-    print("\nLoading model from MLflow...")
+    # Load model from MLflow Model Registry
+    print("\nLoading model from Model Registry...")
     try:
-        result = load_model_from_mlflow("notification_logreg")
+        result = load_model_from_registry(model_name="baseline_model")
         model = result["model"]
-        print(f"Model loaded successfully!")
     except Exception as e:
-        raise Exception(f"Could not load from MLflow: {e}")
+        raise Exception(f"Could not load from Model Registry: {e}")
 
-    
+    # Load scaler (fitted on training data)
+    print("\nLoading scaler from training data...")
+    df = load_data("data/training_data_features_imputed.csv")
+    feature_cols = get_feature_columns()
+    X = df[feature_cols].values
+    scaler = StandardScaler()
+    scaler.fit(X)
+    print("Scaler fitted on training data.")
 
-    print("Running decisions for all users:")
+    print("\nRunning decisions for all users:")
     print("="*60)
     
     for user_id in FEATURE_STORE.keys():
