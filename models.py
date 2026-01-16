@@ -1,8 +1,13 @@
 import pandas as pd
+import os
+import json
+from datetime import datetime
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-import os 
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 
 # ============ Reusable Utility Functions ============
 
@@ -53,13 +58,55 @@ def evaluate_model(y_true, y_pred, split_name=""):
     return metrics
 
 
-# ============ Main Training Logic ============
-
-if __name__ == "__main__":
-    # Load and split data
-    df = load_data("data/training_data_features_imputed.csv")
-    train, valid, test = time_based_split(df)
+def plot_confusion_matrix(y_true, y_pred, save_path, split_name=""):
+    """Plot and save confusion matrix as PNG"""
+    cm = confusion_matrix(y_true, y_pred)
     
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=['Not Opened', 'Opened'],
+                yticklabels=['Not Opened', 'Opened'])
+    plt.title(f'Confusion Matrix - {split_name}')
+    plt.ylabel('Actual')
+    plt.xlabel('Predicted')
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    
+    print(f"Confusion matrix saved to {save_path}")
+
+
+# ============ Experiment Setup ============
+
+def run_experiment(data_path, model_class, hyperparams, experiment_name=None):
+    """
+    Run a complete experiment with given data, model, and hyperparameters.
+    Saves all results to an experiment-specific folder.
+    
+    Args:
+        data_path: Path to the feature data CSV
+        model_class: sklearn model class (e.g., LogisticRegression)
+        hyperparams: dict of hyperparameters for the model
+        experiment_name: Optional name for the experiment (auto-generated if None)
+    
+    Returns:
+        dict with train/valid metrics and experiment path
+    """
+    # Create experiment folder with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if experiment_name is None:
+        experiment_name = model_class.__name__
+    exp_folder = f"experiments/{experiment_name}/{timestamp}"
+    os.makedirs(exp_folder, exist_ok=True)
+    
+    print(f"\n{'='*50}")
+    print(f"Running Experiment: {experiment_name}")
+    print(f"Experiment folder: {exp_folder}")
+    print(f"{'='*50}")
+    
+    # Load and split data
+    df = load_data(data_path)
+    train, valid, test = time_based_split(df)
     print(f"Data splits: train={len(train)}, valid={len(valid)}, test={len(test)}")
     
     # Prepare X, y
