@@ -81,7 +81,7 @@ def plot_confusion_matrix(y_true, y_pred, save_path, split_name=""):
 
 # ============ Experiment Setup ============
 
-def run_experiment(data_path, model_class, hyperparams, experiment_name=None):
+def run_experiment(data_path, model_class, hyperparams, experiment_name):
     """
     Run a complete experiment with given data, model, and hyperparameters.
     Saves all results to an experiment-specific folder.
@@ -90,96 +90,112 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name=None):
         data_path: Path to the feature data CSV
         model_class: sklearn model class (e.g., LogisticRegression)
         hyperparams: dict of hyperparameters for the model
-        experiment_name: Optional name for the experiment (auto-generated if None)
+        experiment_name: Name for the experiment
     
     Returns:
         dict with train/valid metrics and experiment path
     """
     # Create experiment folder with timestamp
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    if experiment_name is None:
-        experiment_name = model_class.__name__
-    exp_folder = f"experiments/{experiment_name}/{timestamp}"
-    os.makedirs(exp_folder, exist_ok=True)
-    
-    print(f"\n{'='*50}")
-    print(f"Running Experiment: {experiment_name}")
-    print(f"Experiment folder: {exp_folder}")
-    print(f"{'='*50}")
-    
-    # Load and split data
-    df = load_data(data_path)
-    train, valid, test = time_based_split(df)
-    print(f"Data splits: train={len(train)}, valid={len(valid)}, test={len(test)}")
-    
-    # Prepare X, y
-    features = get_feature_columns()
-    X_train, y_train = train[features], train["opened"]
-    X_valid, y_valid = valid[features], valid["opened"]
-    X_test, y_test = test[features], test["opened"]
-    
-    # Scale features
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_valid_scaled = scaler.transform(X_valid)
-    X_test_scaled = scaler.transform(X_test)
-    
-    # Train model
-    model = model_class(**hyperparams)
-    model.fit(X_train_scaled, y_train)
-    
-    # Evaluate on training set
-    y_train_pred = model.predict(X_train_scaled)
-    train_metrics = evaluate_model(y_train, y_train_pred, "Training")
-    plot_confusion_matrix(y_train, y_train_pred, 
-                          f"{exp_folder}/confusion_matrix_train.png", "Training")
-    
-    # Evaluate on validation set
-    y_valid_pred = model.predict(X_valid_scaled)
-    valid_metrics = evaluate_model(y_valid, y_valid_pred, "Validation")
-    plot_confusion_matrix(y_valid, y_valid_pred, 
-                          f"{exp_folder}/confusion_matrix_valid.png", "Validation")
-    
-    # Save coefficients (if model has them)
-    if hasattr(model, 'coef_'):
-        coefficients_df = pd.DataFrame({
-            "feature": features,
-            "coefficient": model.coef_[0]
-        })
-        coefficients_df = coefficients_df.sort_values("coefficient", key=abs, ascending=False)
-        coefficients_df.to_csv(f"{exp_folder}/coefficients.csv", index=False)
+    mlflow.set_experiment(experiment_name)
+    with mlflow.start_run():
+        mlflow.log_param("hyperparams", hyperparams)
+        mlflow.log_param("data_path", data_path)
+        mlflow.log_param("experiment_name", experiment_name)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        exp_folder = f"experiments/{experiment_name}"
+        os.makedirs(exp_folder, exist_ok=True)
         
-        print("\nFeature Coefficients (sorted by importance):")
-        print(coefficients_df.to_string(index=False))
-    
-    # Save experiment config and results
-    experiment_results = {
-        "experiment_name": experiment_name,
-        "timestamp": timestamp,
-        "data_path": data_path,
-        "hyperparams": hyperparams,
-        "features": features,
-        "data_splits": {
+        print(f"\n{'='*50}")
+        print(f"Running Experiment: {experiment_name}")
+        print(f"Experiment folder: {exp_folder}")
+        print(f"{'='*50}")
+        
+        # Load and split data
+        df = load_data(data_path)
+        train, valid, test = time_based_split(df)
+        mlflow.log_param("data_splits", {
             "train": len(train),
             "valid": len(valid),
             "test": len(test)
-        },
-        "train_metrics": train_metrics,
-        "valid_metrics": valid_metrics
-    }
-    
-    with open(f"{exp_folder}/experiment_results.json", 'w') as f:
-        json.dump(experiment_results, f, indent=2)
-    
-    print(f"\nExperiment results saved to {exp_folder}/experiment_results.json")
-    
-    return {
-        "train_metrics": train_metrics,
-        "valid_metrics": valid_metrics,
-        "exp_folder": exp_folder,
-        "model": model,
-        "scaler": scaler
-    }
+        })
+        
+        # Prepare X, y
+        features = get_feature_columns()
+        X_train, y_train = train[features], train["opened"]
+        X_valid, y_valid = valid[features], valid["opened"]
+        X_test, y_test = test[features], test["opened"]
+        mlflow.log_param("features", features)
+        
+        # Scale features
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_valid_scaled = scaler.transform(X_valid)
+        X_test_scaled = scaler.transform(X_test)
+        
+        # Train model
+        model = model_class(**hyperparams)
+        model.fit(X_train_scaled, y_train)
+        mlflow.sklearn.log_model(sk_model=model, name=f"{model_class.__name__}_{experiment_name}")
+        # Evaluate on training set
+        y_train_pred = model.predict(X_train_scaled)
+        train_metrics = evaluate_model(y_train, y_train_pred, "Training")
+        mlflow.log_metric("train_accuracy", train_metrics["accuracy"])
+        mlflow.log_metric("train_precision", train_metrics["precision"])
+        mlflow.log_metric("train_recall", train_metrics["recall"])
+        mlflow.log_metric("train_f1", train_metrics["f1"])
+        plot_confusion_matrix(y_train, y_train_pred, 
+                            f"{exp_folder}/confusion_matrix_train.png", "Training")
+        mlflow.log_artifact(f"{exp_folder}/confusion_matrix_train.png")
+        
+        # Evaluate on validation set
+        y_valid_pred = model.predict(X_valid_scaled)
+        valid_metrics = evaluate_model(y_valid, y_valid_pred, "Validation")
+        plot_confusion_matrix(y_valid, y_valid_pred, 
+                            f"{exp_folder}/confusion_matrix_valid.png", "Validation")
+        mlflow.log_artifact(f"{exp_folder}/confusion_matrix_valid.png")
+        # Save coefficients (if model has them)
+        if hasattr(model, 'coef_'):
+            coefficients_df = pd.DataFrame({
+                "feature": features,
+                "coefficient": model.coef_[0]
+            })
+            coefficients_df = coefficients_df.sort_values("coefficient", key=abs, ascending=False)
+            coefficients_df.to_csv(f"{exp_folder}/coefficients.csv", index=False)
+            mlflow.log_artifact(f"{exp_folder}/coefficients.csv")
+            print("\nFeature Coefficients (sorted by importance):")
+            print(coefficients_df.to_string(index=False))
+        mlflow.log_metric("valid_accuracy", valid_metrics["accuracy"])
+        mlflow.log_metric("valid_precision", valid_metrics["precision"])
+        mlflow.log_metric("valid_recall", valid_metrics["recall"])
+        mlflow.log_metric("valid_f1", valid_metrics["f1"])
+        # Save experiment config and results
+        experiment_results = {
+            "experiment_name": experiment_name,
+            "timestamp": timestamp,
+            "data_path": data_path,
+            "hyperparams": hyperparams,
+            "features": features,
+            "data_splits": {
+                "train": len(train),
+                "valid": len(valid),
+                "test": len(test)
+            },
+            "train_metrics": train_metrics,
+            "valid_metrics": valid_metrics
+        }
+        
+        with open(f"{exp_folder}/experiment_results.json", 'w') as f:
+            json.dump(experiment_results, f, indent=2)
+        
+        print(f"\nExperiment results saved to {exp_folder}/experiment_results.json")
+        
+        return {
+            "train_metrics": train_metrics,
+            "valid_metrics": valid_metrics,
+            "exp_folder": exp_folder,
+            "model": model,
+            "scaler": scaler
+        }
 
 
 # ============ Main ============
@@ -188,15 +204,8 @@ if __name__ == "__main__":
     
     # Define experiment config
     data_path = "data/training_data_features_imputed.csv"
-    experiment_name = "logistic_regression"
+    experiment_name = f"logistic_regression_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-    mlflow.set_experiment(experiment_name)
-    with mlflow.start_run():    
-        mlflow.log_param("test param", "test value")
-        print("connect to mlflow")
-    mlflow.sklearn.autolog()
-    
-    # raise Exception("stop here")
     hyperparams = {
         "penalty": None,
         "max_iter": 1000,
