@@ -7,7 +7,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 import matplotlib.pyplot as plt
 import seaborn as sns
+import mlflow
+from dotenv import load_dotenv
 
+load_dotenv(".env")
 
 # ============ Reusable Utility Functions ============
 
@@ -182,9 +185,18 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name=None):
 # ============ Main ============
 
 if __name__ == "__main__":
+    
     # Define experiment config
     data_path = "data/training_data_features_imputed.csv"
+    experiment_name = "logistic_regression"
+
+    mlflow.set_experiment(experiment_name)
+    with mlflow.start_run():    
+        mlflow.log_param("test param", "test value")
+        print("connect to mlflow")
+    mlflow.sklearn.autolog()
     
+    # raise Exception("stop here")
     hyperparams = {
         "penalty": None,
         "max_iter": 1000,
@@ -196,7 +208,7 @@ if __name__ == "__main__":
         data_path=data_path,
         model_class=LogisticRegression,
         hyperparams=hyperparams,
-        experiment_name="logistic_regression"
+        experiment_name=experiment_name
     )
     
     print("\n" + "="*50)
