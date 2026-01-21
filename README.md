@@ -52,7 +52,8 @@ python models.py          # Logistic Regression
 python models_lgbm.py     # LightGBM
 
 # 4. Hyperparameter tuning with Optuna
-python tune_lgbm.py
+python tune_logreg.py    # Logistic Regression HPO
+python tune_lgbm.py      # LightGBM HPO
 
 # 5. Run decision engine
 python decision_engine.py
