@@ -157,7 +157,10 @@ def run_tuning(n_trials: int = 100):
         
         print(f"\nBest model plots saved to: {plot_dir}")
     
-
+    optuna.visualization.plot_optimization_history(study).savefig("optimization_history.png")
+    mlflow.log_artifact("optimization_history.png")
+    optuna.visualization.plot_param_importances(study).savefig("param_importances.png")
+    mlflow.log_artifact("param_importances.png")
 
 
     return study
@@ -166,7 +169,3 @@ def run_tuning(n_trials: int = 100):
 
 if __name__ == "__main__":
     study = run_tuning(n_trials=100)
-
-    #to show the optimization histo, ry, we can use the following
-    # optuna.visualization.plot_optimization_history(study).show()
-    # optuna.visualization.plot_param_importances(study).show()
