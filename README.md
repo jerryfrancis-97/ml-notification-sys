@@ -48,9 +48,45 @@ python feature_engg.py
 python impute_features.py
 
 # 3. Train model (logs to MLflow)
-python models.py
+python models.py          # Logistic Regression
+python models_lgbm.py     # LightGBM
 
-# 4. Run decision engine
+# 4. Hyperparameter tuning with Optuna
+python tune_lgbm.py
+
+# 5. Run decision engine
 python decision_engine.py
 ```
 
+## Experiment Results
+
+### Model Comparison (Validation Set)
+
+| Model | Accuracy | Precision | Recall | F1 Score |
+|-------|----------|-----------|--------|----------|
+| Logistic Regression | 0.644 | 0.354 | 0.497 | 0.413 |
+| LightGBM (default) | 0.686 | 0.412 | 0.576 | **0.481** |
+| LightGBM (HPO best) | **0.765** | **0.778** | 0.093 | 0.166 |
+
+### Key Observations
+
+- **LightGBM (default)** achieves the best F1 score (0.481) with balanced precision/recall
+- **LightGBM (HPO)** optimized for F1 but converged to high-precision/low-recall (conservative predictions)
+- **Logistic Regression** provides a solid baseline with interpretable coefficients
+
+### Features Used
+
+| Feature | Description |
+|---------|-------------|
+| `hour`, `hour_sin`, `hour_cos` | Time of day (cyclical encoding) |
+| `day_of_week`, `is_weekend` | Day information |
+| `num_notifications_last_24h` | Notification fatigue indicator |
+| `delay_since_last_open_notification` | Recency of engagement |
+| `user_open_rate` | Historical user engagement rate |
+| `user_hour_open_rate` | User's hour-specific engagement pattern |
+
+### Data Split
+
+- **Train**: 2,100 samples (70%)
+- **Validation**: 599 samples (20%)
+- **Test**: 301 samples (10%)
