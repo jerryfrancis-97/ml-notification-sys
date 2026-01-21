@@ -189,7 +189,7 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name):
     with mlflow.start_run(run_name=run_name):
         mlflow.log_param("hyperparams", hyperparams)
         mlflow.log_param("data_path", data_path)
-        # mlflow.log_param("experiment_name", experiment_name)
+        
         exp_folder = f"experiments/{experiment_name}/{timestamp}"
         os.makedirs(exp_folder, exist_ok=True)
         
@@ -205,6 +205,24 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name):
             "train": len(train),
             "valid": len(valid),
             "test": len(test)
+        })
+        
+        # Log dataset as artifact
+        mlflow.log_artifact(data_path, artifact_path="datasets")
+        
+        # Save and log train/valid/test splits
+        train.to_csv(f"{exp_folder}/train_split.csv", index=False)
+        valid.to_csv(f"{exp_folder}/valid_split.csv", index=False)
+        test.to_csv(f"{exp_folder}/test_split.csv", index=False)
+        mlflow.log_artifact(f"{exp_folder}/train_split.csv", artifact_path="datasets")
+        mlflow.log_artifact(f"{exp_folder}/valid_split.csv", artifact_path="datasets")
+        mlflow.log_artifact(f"{exp_folder}/test_split.csv", artifact_path="datasets")
+        
+        # Log dataset metadata
+        mlflow.log_param("dataset_shape", df.shape)
+        mlflow.log_param("target_distribution", {
+            "opened_0": int((df["opened"] == 0).sum()),
+            "opened_1": int((df["opened"] == 1).sum())
         })
         
         # Prepare X, y

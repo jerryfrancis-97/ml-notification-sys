@@ -212,6 +212,24 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
             "test": len(test)
         })
         
+        # Log dataset as artifact
+        mlflow.log_artifact(data_path, artifact_path="datasets")
+        
+        # Save and log train/valid/test splits
+        train.to_csv(f"{exp_folder}/train_split.csv", index=False)
+        valid.to_csv(f"{exp_folder}/valid_split.csv", index=False)
+        test.to_csv(f"{exp_folder}/test_split.csv", index=False)
+        mlflow.log_artifact(f"{exp_folder}/train_split.csv", artifact_path="datasets")
+        mlflow.log_artifact(f"{exp_folder}/valid_split.csv", artifact_path="datasets")
+        mlflow.log_artifact(f"{exp_folder}/test_split.csv", artifact_path="datasets")
+        
+        # Log dataset metadata
+        mlflow.log_param("dataset_shape", df.shape)
+        mlflow.log_param("target_distribution", {
+            "opened_0": int((df["opened"] == 0).sum()),
+            "opened_1": int((df["opened"] == 1).sum())
+        })
+        
         # Prepare X, y (no scaling needed for tree-based models)
         features = get_feature_columns()
         X_train, y_train = train[features].values, train["opened"].values
