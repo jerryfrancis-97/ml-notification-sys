@@ -87,6 +87,88 @@ def plot_accuracy_curves(evals_result, save_path):
     print(f"Accuracy curves saved to {save_path}")
 
 
+def compute_metrics_per_round(model, X_train, y_train, X_valid, y_valid):
+    """
+    Compute F1, precision, and recall at each boosting round for train and validation.
+    Returns dict with metrics arrays for plotting.
+    """
+    from sklearn.metrics import f1_score, precision_score, recall_score
+    
+    n_rounds = model.n_estimators_
+    
+    metrics = {
+        'train_f1': [], 'valid_f1': [],
+        'train_precision': [], 'valid_precision': [],
+        'train_recall': [], 'valid_recall': []
+    }
+    
+    for i in range(1, n_rounds + 1):
+        # Predict using first i trees
+        y_train_pred = (model.predict_proba(X_train, num_iteration=i)[:, 1] >= 0.5).astype(int)
+        y_valid_pred = (model.predict_proba(X_valid, num_iteration=i)[:, 1] >= 0.5).astype(int)
+        
+        # Compute metrics
+        metrics['train_f1'].append(f1_score(y_train, y_train_pred, zero_division=0))
+        metrics['valid_f1'].append(f1_score(y_valid, y_valid_pred, zero_division=0))
+        metrics['train_precision'].append(precision_score(y_train, y_train_pred, zero_division=0))
+        metrics['valid_precision'].append(precision_score(y_valid, y_valid_pred, zero_division=0))
+        metrics['train_recall'].append(recall_score(y_train, y_train_pred, zero_division=0))
+        metrics['valid_recall'].append(recall_score(y_valid, y_valid_pred, zero_division=0))
+    
+    return metrics
+
+
+def plot_f1_curves(metrics, save_path):
+    """Plot training and validation F1 score curves over boosting rounds"""
+    plt.figure(figsize=(10, 6))
+    plt.plot(metrics['train_f1'], label='Training F1', color='blue')
+    plt.plot(metrics['valid_f1'], label='Validation F1', color='orange')
+    plt.xlabel('Boosting Round')
+    plt.ylabel('F1 Score')
+    plt.title('LightGBM Training History - F1 Score')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    
+    print(f"F1 curves saved to {save_path}")
+
+
+def plot_precision_curves(metrics, save_path):
+    """Plot training and validation precision curves over boosting rounds"""
+    plt.figure(figsize=(10, 6))
+    plt.plot(metrics['train_precision'], label='Training Precision', color='blue')
+    plt.plot(metrics['valid_precision'], label='Validation Precision', color='orange')
+    plt.xlabel('Boosting Round')
+    plt.ylabel('Precision')
+    plt.title('LightGBM Training History - Precision')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    
+    print(f"Precision curves saved to {save_path}")
+
+
+def plot_recall_curves(metrics, save_path):
+    """Plot training and validation recall curves over boosting rounds"""
+    plt.figure(figsize=(10, 6))
+    plt.plot(metrics['train_recall'], label='Training Recall', color='blue')
+    plt.plot(metrics['valid_recall'], label='Validation Recall', color='orange')
+    plt.xlabel('Boosting Round')
+    plt.ylabel('Recall')
+    plt.title('LightGBM Training History - Recall')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    
+    print(f"Recall curves saved to {save_path}")
+
+
 # ============ Experiment Setup ============
 
 def run_lgbm_experiment(data_path, hyperparams, experiment_name):
@@ -175,6 +257,22 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
         # Plot accuracy curves
         plot_accuracy_curves(evals_result, f"{exp_folder}/accuracy_curves.png")
         mlflow.log_artifact(f"{exp_folder}/accuracy_curves.png")
+        
+        # Compute F1, precision, recall per round
+        print("Computing F1, precision, recall per round...")
+        round_metrics = compute_metrics_per_round(model, X_train, y_train, X_valid, y_valid)
+        
+        # Plot F1 curves
+        plot_f1_curves(round_metrics, f"{exp_folder}/f1_curves.png")
+        mlflow.log_artifact(f"{exp_folder}/f1_curves.png")
+        
+        # Plot precision curves
+        plot_precision_curves(round_metrics, f"{exp_folder}/precision_curves.png")
+        mlflow.log_artifact(f"{exp_folder}/precision_curves.png")
+        
+        # Plot recall curves
+        plot_recall_curves(round_metrics, f"{exp_folder}/recall_curves.png")
+        mlflow.log_artifact(f"{exp_folder}/recall_curves.png")
         
         # Plot feature importance
         print("Generating feature importance plot...")
