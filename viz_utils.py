@@ -358,7 +358,7 @@ def plot_loss_learning_curve_lgbm(X_train, y_train, X_valid, y_valid, hyperparam
         y_train_subset = y_train[:size]
         
         # Train model
-        model = LGBMClassifier(**hyperparams_copy, verbose=-1)
+        model = LGBMClassifier(**hyperparams_copy)
         model.fit(X_train_subset, y_train_subset)
         
         # Compute losses
