@@ -66,7 +66,7 @@ class FeatureEngineering:
         df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
         return df
 
-    def adding_interactions_features(df: pd.DataFrame) -> pd.DataFrame:
+    def adding_interactions_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """ Adds interactions features to the dataframe """
         df["hour_x_user_open_rate"] = df["hour"] * df["user_open_rate"]
         df["hour_x_user_hour_open_rate"] = df["hour"] * df["user_hour_open_rate"]
