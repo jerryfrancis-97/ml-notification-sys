@@ -6,18 +6,23 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import f1_score
 import mlflow
-from models import (
-    load_data, get_feature_columns, time_based_split,
-    evaluate_model, plot_confusion_matrix, plot_pr_curve, 
-    plot_roc_curve, plot_learning_curve
+
+# Import from utility modules
+from data_utils import DataLoader, evaluate_model
+from viz_utils import (
+    plot_confusion_matrix, plot_pr_curve, plot_roc_curve,
+    plot_learning_curve, plot_coefficients
 )
 from analysis_utils import export_confusion_matrix_splits
 
 
 DATA_PATH = "data/training_data_features_imputed.csv"
-df = load_data(DATA_PATH)
-train, valid, test = time_based_split(df)
-features = get_feature_columns()
+
+# Use DataLoader for data preparation
+data_loader = DataLoader(DATA_PATH)
+data_loader.load_data()
+train, valid, test = data_loader.time_based_split()
+features = data_loader.get_features()
 
 X_train, y_train = train[features].values, train["opened"].values
 X_valid, y_valid = valid[features].values, valid["opened"].values
@@ -67,32 +72,6 @@ def objective(trial):
     f1 = f1_score(y_valid, y_pred)
     
     return f1
-
-
-def plot_coefficients(model, feature_names, save_path):
-    """Plot logistic regression coefficients as horizontal bar chart"""
-    import matplotlib.pyplot as plt
-    import pandas as pd
-    
-    coef_df = pd.DataFrame({
-        "feature": feature_names,
-        "coefficient": model.coef_[0]
-    }).sort_values("coefficient", key=abs, ascending=True)
-    
-    colors = ['green' if c > 0 else 'red' for c in coef_df["coefficient"]]
-    
-    plt.figure(figsize=(10, 8))
-    plt.barh(coef_df["feature"], coef_df["coefficient"], color=colors)
-    plt.xlabel('Coefficient Value')
-    plt.ylabel('Feature')
-    plt.title('Logistic Regression Coefficients')
-    plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-    
-    print(f"Coefficients plot saved to {save_path}")
-    return coef_df
 
 
 def run_tuning(n_trials: int = 100):

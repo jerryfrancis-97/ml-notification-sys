@@ -1,28 +1,32 @@
 import os
 from datetime import datetime
 import optuna
-from optuna.integration import LightGBMPruningCallback
 import lightgbm as lgb
-import pandas as pd
 import mlflow
 from sklearn.metrics import f1_score
-from models import load_data, get_feature_columns, time_based_split
-from models_lgbm import (
+
+# Import from utility modules
+from data_utils import DataLoader, evaluate_model
+from viz_utils import (
+    plot_confusion_matrix, plot_pr_curve, plot_roc_curve,
     plot_training_history, plot_accuracy_curves, plot_f1_curves,
     plot_precision_curves, plot_recall_curves, plot_feature_importance,
     compute_metrics_per_round
 )
-from models import plot_confusion_matrix, plot_pr_curve, plot_roc_curve, evaluate_model
 from analysis_utils import export_confusion_matrix_splits
 
 
 DATA_PATH = "data/training_data_features_imputed.csv"
-df = load_data(DATA_PATH)
-train, valid, test = time_based_split(df)
-features = get_feature_columns()
+
+# Use DataLoader for data preparation
+data_loader = DataLoader(DATA_PATH)
+data_loader.load_data()
+train, valid, test = data_loader.time_based_split()
+features = data_loader.get_features()
 
 X_train, y_train = train[features].values, train["opened"].values
 X_valid, y_valid = valid[features].values, valid["opened"].values
+
 
 def objective(trial):
     """Objective function for Lightgbm tuning"""
