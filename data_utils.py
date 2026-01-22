@@ -1,8 +1,38 @@
 """
 Data loading and preparation utilities.
 """
+import os
 import pandas as pd
+import yaml
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+
+
+def get_dvc_hash(data_path):
+    """
+    Extract the DVC hash (MD5) from the corresponding .dvc file.
+    """
+    dvc_file = f"{data_path}.dvc"
+    
+    if not os.path.exists(dvc_file):
+        print(f"Warning: DVC file not found at {dvc_file}")
+        return None
+    
+    try:
+        with open(dvc_file, 'r') as f:
+            dvc_content = yaml.safe_load(f)
+        
+        if dvc_content and 'outs' in dvc_content and len(dvc_content['outs']) > 0:
+            out = dvc_content['outs'][0]
+            return {
+                'md5': out.get('md5'),
+                'size': out.get('size'),
+                'path': out.get('path'),
+                'hash_type': out.get('hash', 'md5')
+            }
+    except Exception as e:
+        print(f"Warning: Could not read DVC file: {e}")
+    
+    return None
 
 
 class DataLoader:
