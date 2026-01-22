@@ -66,6 +66,57 @@ class FeatureEngineering:
         df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
         return df
 
+    def create_time_buckets(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Create time buckets based on hour: morning, afternoon, evening, night
+        """
+        def get_time_bucket(hour):
+            if 6 <= hour < 12:
+                return 'morning'
+            elif 12 <= hour < 17:
+                return 'afternoon'
+            elif 17 <= hour < 21:
+                return 'evening'
+            else:
+                return 'night'
+
+        df['time_bucket'] = df['hour'].apply(get_time_bucket)
+        return df
+
+    def calc_user_bucket_open_rates(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Calculate separate user open rates for each time bucket (morning, afternoon, evening, night)
+        using rolling cumulative statistics. Excludes current row from calculation using shift(1)
+        """
+        time_buckets = ['morning', 'afternoon', 'evening', 'night']
+
+        for bucket in time_buckets:
+            # Create mask for this time bucket
+            bucket_mask = df['time_bucket'] == bucket
+
+            # Group by user (only for this time bucket)
+            grouped = df[bucket_mask].groupby('user_id')
+
+            # Calculate cumulative opens and sends for each user in this time bucket
+            df.loc[bucket_mask, f'{bucket}_opens_cumsum'] = grouped['opened'].cumsum()
+            df.loc[bucket_mask, f'{bucket}_sends_cumcount'] = grouped.cumcount() + 1
+
+            # Calculate rate excluding current row (shift by 1)
+            df.loc[bucket_mask, f'user_{bucket}_open_rate'] = (
+                (df.loc[bucket_mask, f'{bucket}_opens_cumsum'] - df.loc[bucket_mask, 'opened']) /
+                (df.loc[bucket_mask, f'{bucket}_sends_cumcount'] - 1)
+            ).shift(1)
+
+            # Handle division by zero and fill NaN
+            df[f'user_{bucket}_open_rate'] = df[f'user_{bucket}_open_rate'].fillna(0)
+
+        # Clean up intermediate columns
+        intermediate_cols = [f'{bucket}_{suffix}' for bucket in time_buckets
+                           for suffix in ['opens_cumsum', 'sends_cumcount']]
+        df = df.drop(columns=intermediate_cols, errors='ignore')
+
+        return df
+
     def adding_interactions_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """ Adds interactions features to the dataframe """
         df["hour_x_user_open_rate"] = df["hour"] * df["user_open_rate"]
@@ -91,8 +142,12 @@ def feature_engineering_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     df = feature_engineering.calc_delay_since_last_open_notification(df.copy())
     df = feature_engineering.calc_user_open_rate(df.copy())
     df = feature_engineering.calc_user_hour_open_rate(df.copy())
-    df = feature_engineering.calc_hour_cyclical(df.copy())
 
+    # Create time buckets and bucket-specific open rates
+    df = feature_engineering.create_time_buckets(df.copy())
+    df = feature_engineering.calc_user_bucket_open_rates(df.copy())
+
+    df = feature_engineering.calc_hour_cyclical(df.copy())
 
     #adding interactions features
     df = feature_engineering.adding_interactions_features(df.copy())
