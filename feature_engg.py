@@ -109,7 +109,7 @@ def apply_feature_engineering():
     path_to_data_features = "data/training_data_features.csv"
     df = pd.read_csv(path_to_data)
     df = feature_engineering_pipeline(df)
-    # df.to_csv(path_to_data_features, index=False)
+    df.to_csv(path_to_data_features, index=False)
     return df
 
 if __name__ == "__main__":
