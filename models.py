@@ -8,7 +8,7 @@ import mlflow
 from dotenv import load_dotenv
 
 # Import from utility modules
-from data_utils import DataLoader, evaluate_model, load_data, get_feature_columns, time_based_split
+from data_utils import DataLoader, evaluate_model, load_data, get_feature_columns, time_based_split, get_dvc_hash
 from viz_utils import (
     plot_confusion_matrix, plot_learning_curve, plot_loss_learning_curve,
     plot_pr_curve, plot_roc_curve
@@ -41,6 +41,13 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name):
     with mlflow.start_run(run_name=run_name):
         mlflow.log_param("hyperparams", hyperparams)
         mlflow.log_param("data_path", data_path)
+        
+        # Log DVC data hash for data lineage tracking
+        dvc_info = get_dvc_hash(data_path)
+        if dvc_info:
+            mlflow.log_param("data_dvc_md5", dvc_info['md5'])
+            mlflow.log_param("data_dvc_size", dvc_info['size'])
+            print(f"DVC Data Hash: {dvc_info['md5']}")
         
         exp_folder = f"experiments/{experiment_name}/{timestamp}"
         os.makedirs(exp_folder, exist_ok=True)

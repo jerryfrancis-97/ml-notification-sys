@@ -8,7 +8,7 @@ from sklearn.metrics import f1_score
 import mlflow
 
 # Import from utility modules
-from data_utils import DataLoader, evaluate_model
+from data_utils import DataLoader, evaluate_model, get_dvc_hash
 from viz_utils import (
     plot_confusion_matrix, plot_pr_curve, plot_roc_curve,
     plot_learning_curve, plot_coefficients
@@ -96,6 +96,13 @@ def run_tuning(n_trials: int = 100):
         mlflow.set_tag("mlflow.note.content", "best_logreg_from_hpo")
         mlflow.log_params(study.best_params)
         mlflow.log_metric("best_f1_from_optuna", study.best_value)
+        
+        # Log DVC data hash for data lineage tracking
+        dvc_info = get_dvc_hash(DATA_PATH)
+        if dvc_info:
+            mlflow.log_param("data_dvc_md5", dvc_info['md5'])
+            mlflow.log_param("data_dvc_size", dvc_info['size'])
+            print(f"DVC Data Hash: {dvc_info['md5']}")
         
         # Reconstruct best params for model
         best_params = study.best_params.copy()

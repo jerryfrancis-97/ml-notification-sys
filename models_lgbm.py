@@ -8,7 +8,7 @@ import mlflow
 from dotenv import load_dotenv
 
 # Import from utility modules
-from data_utils import DataLoader, evaluate_model
+from data_utils import DataLoader, evaluate_model, get_dvc_hash
 from viz_utils import (
     plot_confusion_matrix, plot_pr_curve, plot_roc_curve,
     plot_feature_importance, plot_training_history, plot_accuracy_curves,
@@ -44,6 +44,13 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
         mlflow.log_param("hyperparams", hyperparams)
         mlflow.log_param("data_path", data_path)
         mlflow.log_param("model_type", "LightGBM")
+        
+        # Log DVC data hash for data lineage tracking
+        dvc_info = get_dvc_hash(data_path)
+        if dvc_info:
+            mlflow.log_param("data_dvc_md5", dvc_info['md5'])
+            mlflow.log_param("data_dvc_size", dvc_info['size'])
+            print(f"DVC Data Hash: {dvc_info['md5']}")
         
         # Create experiment folder
         exp_folder = f"experiments/{experiment_name}/{timestamp}"
