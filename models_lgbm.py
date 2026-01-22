@@ -14,6 +14,7 @@ from models import (
     load_data, get_feature_columns, time_based_split, evaluate_model,
     plot_confusion_matrix, plot_pr_curve, plot_roc_curve
 )
+from analysis_utils import export_confusion_matrix_splits
 
 load_dotenv(".env")
 
@@ -338,6 +339,13 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
         plot_confusion_matrix(y_valid, y_valid_pred, 
                             f"{exp_folder}/confusion_matrix_valid.png", "Validation")
         mlflow.log_artifact(f"{exp_folder}/confusion_matrix_valid.png")
+        
+        # Export confusion matrix splits for qualitative analysis
+        cm_splits = export_confusion_matrix_splits(
+            y_valid, y_valid_pred, valid, exp_folder, "valid"
+        )
+        for path in cm_splits.values():
+            mlflow.log_artifact(path, artifact_path="confusion_matrix_analysis")
         
         # PR and ROC curves for validation
         valid_pr_auc = plot_pr_curve(y_valid, y_valid_proba, 
