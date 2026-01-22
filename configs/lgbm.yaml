@@ -1,0 +1,25 @@
+# LightGBM Configuration
+# =======================
+
+model:
+  name: lgbm
+  hyperparams:
+    n_estimators: 500
+    learning_rate: 0.05
+    max_depth: 6
+    num_leaves: 31
+    min_child_samples: 20
+    class_weight: balanced
+    random_state: 42
+    verbose: -1
+    early_stopping_rounds: 50
+
+training:
+  train_ratio: 0.7
+  valid_ratio: 0.2
+
+data:
+  path: data/training_data_features.csv
+
+experiment:
+  name: notification_lgbm

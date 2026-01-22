@@ -1,0 +1,21 @@
+# Logistic Regression Configuration
+# ===================================
+
+model:
+  name: logreg
+  hyperparams:
+    penalty: l2
+    solver: saga
+    max_iter: 1000
+    class_weight: balanced
+    random_state: 42
+
+training:
+  train_ratio: 0.7
+  valid_ratio: 0.2
+
+data:
+  path: data/training_data_features.csv
+
+experiment:
+  name: notification_logreg

@@ -16,6 +16,7 @@ Usage:
 import argparse
 import os
 import json
+import yaml
 from datetime import datetime
 
 import pandas as pd
@@ -42,6 +43,28 @@ from viz_utils import (
 from analysis_utils import export_confusion_matrix_splits
 
 load_dotenv(".env")
+
+
+# ============ Config Loading ============
+
+def load_config(config_path):
+    """
+    Load configuration from YAML file.
+    
+    Args:
+        config_path: Path to YAML config file
+    
+    Returns:
+        dict: Configuration dictionary
+    """
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    print(f"\n[Config] Loaded configuration from: {config_path}")
+    print(f"  Model: {config['model']['name']}")
+    print(f"  Experiment: {config['experiment']['name']}")
+    
+    return config
 
 
 # ============ Feature Columns ============
@@ -438,6 +461,12 @@ def run_training(args):
             print(f"\nDVC Data Hash: {dvc_info['md5']}")
             print(f"DVC Data Size: {dvc_info['size']}")
         
+        # Log config file if used
+        if hasattr(args, 'config_path') and args.config_path:
+            mlflow.log_artifact(args.config_path, artifact_path="config")
+            mlflow.log_param("config_file", args.config_path)
+            print(f"Config file: {args.config_path}")
+        
         # Create experiment folder
         exp_folder = f"experiments/{args.experiment}/{timestamp}"
         os.makedirs(exp_folder, exist_ok=True)
@@ -507,13 +536,13 @@ def run_training(args):
         print(f"\n[Step 3] Building and training {args.model.upper()} pipeline...")
         
         if args.model == "logreg":
-            hyperparams = {
-                "penalty": "l2",
-                "solver": "saga",
-                "max_iter": 1000,
-                "class_weight": "balanced",
-                "random_state": 42
-            }
+            # Use hyperparams from config if provided, otherwise use defaults
+            if hasattr(args, 'hyperparams') and args.hyperparams:
+                hyperparams = args.hyperparams
+                print("  Using hyperparams from config file")
+            else:
+                raise ValueError("Hyperparams are required for Logistic Regression")
+            
             mlflow.log_param("hyperparams", hyperparams)
             
             pipeline = build_logreg_pipeline(hyperparams)
@@ -526,17 +555,13 @@ def run_training(args):
             mlflow.sklearn.log_model(pipeline, "model_pipeline")
             
         elif args.model == "lgbm":
-            hyperparams = {
-                "n_estimators": 500,
-                "learning_rate": 0.05,
-                "max_depth": 6,
-                "num_leaves": 31,
-                "min_child_samples": 20,
-                "class_weight": "balanced",
-                "random_state": 42,
-                "verbose": -1,
-                "early_stopping_rounds": 50
-            }
+            # Use hyperparams from config if provided, otherwise use defaults
+            if hasattr(args, 'hyperparams') and args.hyperparams:
+                hyperparams = args.hyperparams
+                print("  Using hyperparams from config file")
+            else:
+                raise ValueError("Hyperparams are required for LightGBM")
+            
             mlflow.log_param("hyperparams", hyperparams)
             
             pipeline = build_lgbm_pipeline(hyperparams)
@@ -604,10 +629,17 @@ def parse_args():
     )
     
     parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML config file (required). Overrides other CLI args."
+    )
+    
+    parser.add_argument(
         "--model",
         type=str,
         choices=["logreg", "lgbm"],
-        required=True,
+        default=None,
         help="Model type to train: 'logreg' (Logistic Regression) or 'lgbm' (LightGBM)"
     )
     
@@ -641,9 +673,26 @@ def parse_args():
     
     args = parser.parse_args()
     
-    # Set default experiment name based on model
-    if args.experiment is None:
-        args.experiment = f"notification_{args.model}"
+    # If config file provided, load it and override args
+    if args.config:
+        config = load_config(args.config)
+        args.model = config['model']['name']
+        args.hyperparams = config['model']['hyperparams']
+        args.train_ratio = config['training']['train_ratio']
+        args.valid_ratio = config['training']['valid_ratio']
+        args.data_path = config.get('data', {}).get('path', args.data_path)
+        args.experiment = config['experiment']['name']
+        args.config_path = args.config  # Store for logging
+    else:
+        # Validate that model is provided if no config
+        if args.model is None:
+            parser.error("--model is required when not using --config")
+        args.hyperparams = None  # Will use defaults in run_training
+        args.config_path = None
+        
+        # Set default experiment name based on model
+        if args.experiment is None:
+            args.experiment = f"notification_{args.model}"
     
     return args
 
