@@ -66,6 +66,13 @@ class FeatureEngineering:
         df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
         return df
 
+    def adding_interactions_features(df: pd.DataFrame) -> pd.DataFrame:
+        """ Adds interactions features to the dataframe """
+        df["hour_x_user_open_rate"] = df["hour"] * df["user_open_rate"]
+        df["hour_x_user_hour_open_rate"] = df["hour"] * df["user_hour_open_rate"]
+        df["hour_x_num_notifications_last_24h"] = df["hour"] * df["num_notifications_last_24h"]
+        df["hour_x_delay_since_last_open_notification"] = df["hour"] * df["delay_since_last_open_notification"]
+        return df
 
 def feature_engineering_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -85,6 +92,12 @@ def feature_engineering_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     df = feature_engineering.calc_user_open_rate(df.copy())
     df = feature_engineering.calc_user_hour_open_rate(df.copy())
     df = feature_engineering.calc_hour_cyclical(df.copy())
+
+
+    #adding interactions features
+    df = feature_engineering.adding_interactions_features(df.copy())
+    #dropping hour column as hour sine and cosine are already added
+    df = df.drop(columns=["hour"])
 
     return df
 
