@@ -1,5 +1,3 @@
-
-logs/
 gx/
 mlruns/
 experiments/
@@ -7,3 +5,5 @@ experiments/
 mlflow.db
 __pycache__/*
 mlartifacts/
+data/logs/response_logs.csv
+data/logs/send_logs.csv
