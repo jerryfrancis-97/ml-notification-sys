@@ -49,7 +49,28 @@ warnings.filterwarnings("ignore")
 load_dotenv(".env")
 
 
-# ============ Config Loading ============
+def detect_feature_columns(df: pd.DataFrame) -> tuple:
+    """
+    Dynamically detect feature columns and columns needing imputation from loaded data.
+
+    Args:
+        df: Loaded DataFrame from CSV
+
+    Returns:
+        tuple: (feature_columns, impute_columns)
+    """
+    exclude_cols = {'user_id', 'opened', 'timestamp', 'time_bucket', 'day', 'hour'}
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    feature_columns = [col for col in numeric_cols if col not in exclude_cols]
+
+    impute_columns = []
+    for col in feature_columns:
+        if df[col].isnull().any():
+            impute_columns.append(col)
+
+    return feature_columns, impute_columns
+
+
 
 def load_config(config_path):
     """
@@ -72,35 +93,33 @@ def load_config(config_path):
 
 
 # ============ Feature Columns ============
-# These should match the columns created by feature_engg.py
 
 FEATURE_COLUMNS = [
     "num_notifications_last_24h",
     "delay_since_last_open_notification",
     "user_open_rate",
     "user_hour_open_rate",
-    # Time bucket-specific open rates
     "user_morning_open_rate",
     "user_afternoon_open_rate",
     "user_evening_open_rate",
     "user_night_open_rate",
+    "user_fatigue_ratio",
     "hour_sin",
     "hour_cos",
-    # Interaction features
     "hour_x_user_open_rate",
     "hour_x_user_hour_open_rate",
     "hour_x_num_notifications_last_24h",
     "hour_x_delay_since_last_open_notification"
 ]
 
-# Columns that need imputation (may have NaN values)
 IMPUTE_COLUMNS = [
     "user_open_rate",
     "user_hour_open_rate",
     "user_morning_open_rate",
     "user_afternoon_open_rate",
     "user_evening_open_rate",
-    "user_night_open_rate"
+    "user_night_open_rate",
+    "user_fatigue_ratio"
 ]
 
 
@@ -214,7 +233,7 @@ class LogisticRegressionStrategy(TrainingStrategy):
 
         # Create imputed validation DataFrame for confusion matrix analysis
         X_valid_imputed_df = data_splits['valid_df'].copy()
-        X_valid_imputed_df[FEATURE_COLUMNS] = X_valid_imputed
+        X_valid_imputed_df[features] = X_valid_imputed
 
         # Predictions using custom threshold
         y_train_pred = pipeline.predict(X_train)
@@ -333,7 +352,7 @@ class LightGBMStrategy(TrainingStrategy):
 
         # Create imputed validation DataFrame for confusion matrix analysis
         X_valid_imputed_df = data_splits['valid_df'].copy()
-        X_valid_imputed_df[FEATURE_COLUMNS] = X_valid_imputed
+        X_valid_imputed_df[features] = X_valid_imputed
 
         # Get hyperparams and handle early stopping
         lgbm_params = hyperparams.copy()
@@ -557,8 +576,11 @@ class TrainingPipeline(ABC):
         if "timestamp" in df.columns:
             df = df.sort_values("timestamp").reset_index(drop=True)
 
-        # Check for missing values in features
-        missing = df[FEATURE_COLUMNS].isnull().sum()
+        feature_columns, impute_columns = detect_feature_columns(df)
+        print(f"  Detected {len(feature_columns)} feature columns: {feature_columns}")
+        print(f"  Columns needing imputation: {impute_columns}")
+
+        missing = df[feature_columns].isnull().sum()
         print(f"\n  Missing values in features (will be imputed):")
         for col, count in missing.items():
             if count > 0:
@@ -584,20 +606,19 @@ class TrainingPipeline(ABC):
         mlflow.log_artifact(f"{exp_folder}/valid_split.csv", artifact_path="datasets/splits")
         mlflow.log_artifact(f"{exp_folder}/test_split.csv", artifact_path="datasets/splits")
 
-        # Extract X, y
-        X_train = train[FEATURE_COLUMNS].values
+        X_train = train[feature_columns].values
         y_train = train["opened"].values
-        X_valid = valid[FEATURE_COLUMNS].values
+        X_valid = valid[feature_columns].values
         y_valid = valid["opened"].values
-        X_test = test[FEATURE_COLUMNS].values
+        X_test = test[feature_columns].values
         y_test = test["opened"].values
 
-        mlflow.log_param("features", FEATURE_COLUMNS)
+        mlflow.log_param("features", feature_columns)
         mlflow.log_param("target", "opened")
 
         # Log target distribution
         train_pos_rate = y_train.mean()
-        valid_pos_rate = y_valid.mean()
+        valid_pos_rate = y_valid.mean() 
         mlflow.log_param("train_positive_rate", f"{train_pos_rate:.4f}")
         mlflow.log_param("valid_positive_rate", f"{valid_pos_rate:.4f}")
         print(f"\n  Target distribution:")
@@ -610,7 +631,9 @@ class TrainingPipeline(ABC):
             'test': (X_test, y_test),
             'train_df': train,
             'valid_df': valid,
-            'test_df': test
+            'test_df': test,
+            'feature_columns': feature_columns,
+            'impute_columns': impute_columns
         }
 
     @abstractmethod
@@ -644,7 +667,8 @@ class TrainingPipeline(ABC):
         pipeline = results.get("pipeline")
         if pipeline:
             imputer = pipeline.named_steps['imputer']
-            imputation_stats = imputer.get_imputation_report(FEATURE_COLUMNS)
+            feature_columns = data_splits.get('feature_columns', FEATURE_COLUMNS)
+            imputation_stats = imputer.get_imputation_report(feature_columns)
 
             # Save imputation statistics as artifact
             stats_path = f"{exp_folder}/imputation_statistics.json"
@@ -661,7 +685,8 @@ class TrainingPipeline(ABC):
             "timestamp": timestamp,
             "model_type": args.model,
             "data_path": args.data_path,
-            "features": FEATURE_COLUMNS,
+            "features": data_splits.get('feature_columns', FEATURE_COLUMNS),
+            "impute_columns": data_splits.get('impute_columns', IMPUTE_COLUMNS),
             "train_size": len(data_splits['train'][0]),
             "valid_size": len(data_splits['valid'][0]),
             "test_size": len(data_splits['test'][0]),
@@ -701,9 +726,12 @@ class LogisticRegressionPipeline(TrainingPipeline):
         X_train, y_train = data_splits['train']
         X_valid, y_valid = data_splits['valid']
 
+        # Use dynamic feature columns
+        feature_columns = data_splits.get('feature_columns', FEATURE_COLUMNS)
+
         results = self.strategy.train(
             pipeline, X_train, y_train, X_valid, y_valid,
-            exp_folder, FEATURE_COLUMNS, args.hyperparams,
+            exp_folder, feature_columns, args.hyperparams,  # 🔄 Use dynamic
             data_splits
         )
 
@@ -734,9 +762,12 @@ class LightGBMPipeline(TrainingPipeline):
         X_train, y_train = data_splits['train']
         X_valid, y_valid = data_splits['valid']
 
+        # Use dynamic feature columns
+        feature_columns = data_splits.get('feature_columns', FEATURE_COLUMNS)
+
         results = self.strategy.train(
             pipeline, X_train, y_train, X_valid, y_valid,
-            exp_folder, FEATURE_COLUMNS, args.hyperparams, data_splits
+            exp_folder, feature_columns, args.hyperparams, data_splits
         )
 
         # Log the pipeline (note: LightGBM may need special handling)
