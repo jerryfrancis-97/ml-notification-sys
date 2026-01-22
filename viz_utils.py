@@ -382,3 +382,56 @@ def plot_loss_learning_curve_lgbm(X_train, y_train, X_valid, y_valid, hyperparam
     plt.close()
     
     print(f"Loss learning curve saved to {save_path}")
+
+def plot_threshold_vs_pr(y_true, y_proba, save_path, split_name=""):
+    """
+    Plot precision and recall vs decision threshold.
+
+    Args:
+        y_true: True labels
+        y_proba: Predicted probabilities for positive class
+        save_path: Path to save the plot
+        split_name: Name of data split (for plot title)
+    """
+    precision, recall, thresholds = precision_recall_curve(y_true, y_proba)
+
+    # Calculate F1 score for each threshold
+    f1_scores = []
+    for thresh in thresholds:
+        y_pred_thresh = (y_proba >= thresh).astype(int)
+        f1 = f1_score(y_true, y_pred_thresh)
+        f1_scores.append(f1)
+
+    plt.figure(figsize=(12, 8))
+
+    # Plot precision and recall vs threshold
+    plt.subplot(2, 1, 1)
+    plt.plot(thresholds, precision[:-1], "b-", label="Precision", linewidth=2)
+    plt.plot(thresholds, recall[:-1], "r-", label="Recall", linewidth=2)
+    plt.xlabel("Decision Threshold")
+    plt.ylabel("Score")
+    plt.title(f"Precision and Recall vs Decision Threshold - {split_name}")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+
+    # Plot F1 score vs threshold
+    plt.subplot(2, 1, 2)
+    plt.plot(thresholds, f1_scores, "g-", label="F1 Score", linewidth=2)
+    plt.xlabel("Decision Threshold")
+    plt.ylabel("F1 Score")
+    plt.title(f"F1 Score vs Decision Threshold - {split_name}")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+    print(f"Threshold vs PR plot saved to {save_path}")
+
+    # Return optimal threshold (max F1)
+    optimal_idx = np.argmax(f1_scores)
+    optimal_threshold = thresholds[optimal_idx]
+    max_f1 = f1_scores[optimal_idx]
+
+    return optimal_threshold, max_f1
