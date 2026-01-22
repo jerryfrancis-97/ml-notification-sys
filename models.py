@@ -86,7 +86,7 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name):
         X_test_scaled = scaler.transform(X_test)
         
         # Train model
-        model = model_class(**hyperparams, solver="saga" if hyperparams["penalty"] == "l1" else "lbfgs")
+        model = model_class(**hyperparams)
         model.fit(X_train_scaled, y_train)
         mlflow.sklearn.log_model(sk_model=model, name=run_name)
         
@@ -197,7 +197,7 @@ if __name__ == "__main__":
 
     hyperparams = {
         "penalty": "l1",
-        "solver": "saga",
+        "solver": "saga" if hyperparams["penalty"] == "l1" else "lbfgs",
         "max_iter": 1000,
         "class_weight": "balanced"
     }
