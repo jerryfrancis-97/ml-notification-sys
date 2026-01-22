@@ -10,6 +10,7 @@ from models import (
     evaluate_model, plot_confusion_matrix, plot_pr_curve, 
     plot_roc_curve, plot_learning_curve
 )
+from analysis_utils import export_confusion_matrix_splits
 
 
 DATA_PATH = "data/training_data_features_imputed.csv"
@@ -197,6 +198,13 @@ def run_tuning(n_trials: int = 100):
         plot_confusion_matrix(y_valid, y_valid_pred, 
                             f"{plot_dir}/confusion_matrix_valid.png", "Validation")
         mlflow.log_artifact(f"{plot_dir}/confusion_matrix_valid.png")
+        
+        # Export confusion matrix splits for qualitative analysis
+        cm_splits = export_confusion_matrix_splits(
+            y_valid, y_valid_pred, valid, plot_dir, "valid"
+        )
+        for path in cm_splits.values():
+            mlflow.log_artifact(path, artifact_path="confusion_matrix_analysis")
         
         # PR and ROC curves for validation
         valid_pr_auc = plot_pr_curve(y_valid, y_valid_proba, 
