@@ -4,170 +4,19 @@ import json
 from datetime import datetime
 import lightgbm as lgb
 from lightgbm import LGBMClassifier
-import matplotlib.pyplot as plt
-import numpy as np
 import mlflow
 from dotenv import load_dotenv
 
-# Import shared utilities from models.py
-from models import (
-    load_data, get_feature_columns, time_based_split, evaluate_model,
-    plot_confusion_matrix, plot_pr_curve, plot_roc_curve
+# Import from utility modules
+from data_utils import DataLoader, evaluate_model
+from viz_utils import (
+    plot_confusion_matrix, plot_pr_curve, plot_roc_curve,
+    plot_feature_importance, plot_training_history, plot_accuracy_curves,
+    compute_metrics_per_round, plot_f1_curves, plot_precision_curves, plot_recall_curves
 )
 from analysis_utils import export_confusion_matrix_splits
 
 load_dotenv(".env")
-
-
-# ============ LightGBM-Specific Functions ============
-
-def plot_feature_importance(model, feature_names, save_path):
-    """Plot LightGBM feature importance as horizontal bar chart"""
-    importance = model.feature_importances_
-    
-    # Create DataFrame and sort
-    importance_df = pd.DataFrame({
-        "feature": feature_names,
-        "importance": importance
-    }).sort_values("importance", ascending=True)
-    
-    plt.figure(figsize=(10, 8))
-    plt.barh(importance_df["feature"], importance_df["importance"], color='steelblue')
-    plt.xlabel('Feature Importance')
-    plt.ylabel('Feature')
-    plt.title('LightGBM Feature Importance')
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-    
-    print(f"Feature importance plot saved to {save_path}")
-    return importance_df
-
-
-def plot_training_history(evals_result, save_path):
-    """Plot training and validation loss curves over boosting rounds"""
-    train_loss = evals_result['training']['binary_logloss']
-    valid_loss = evals_result['valid_1']['binary_logloss']
-    
-    plt.figure(figsize=(10, 6))
-    plt.plot(train_loss, label='Training Loss', color='blue')
-    plt.plot(valid_loss, label='Validation Loss', color='orange')
-    plt.xlabel('Boosting Round')
-    plt.ylabel('Binary Log Loss')
-    plt.title('LightGBM Training History - Loss')
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-    
-    print(f"Training history saved to {save_path}")
-
-
-def plot_accuracy_curves(evals_result, save_path):
-    """Plot training and validation accuracy curves over boosting rounds"""
-    # binary_error is 1 - accuracy, so accuracy = 1 - binary_error
-    train_error = evals_result['training']['binary_error']
-    valid_error = evals_result['valid_1']['binary_error']
-    
-    train_acc = [1 - e for e in train_error]
-    valid_acc = [1 - e for e in valid_error]
-    
-    plt.figure(figsize=(10, 6))
-    plt.plot(train_acc, label='Training Accuracy', color='blue')
-    plt.plot(valid_acc, label='Validation Accuracy', color='orange')
-    plt.xlabel('Boosting Round')
-    plt.ylabel('Accuracy')
-    plt.title('LightGBM Training History - Accuracy')
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-    
-    print(f"Accuracy curves saved to {save_path}")
-
-
-def compute_metrics_per_round(model, X_train, y_train, X_valid, y_valid):
-    """
-    Compute F1, precision, and recall at each boosting round for train and validation.
-    Returns dict with metrics arrays for plotting.
-    """
-    from sklearn.metrics import f1_score, precision_score, recall_score
-    
-    n_rounds = model.n_estimators_
-    
-    metrics = {
-        'train_f1': [], 'valid_f1': [],
-        'train_precision': [], 'valid_precision': [],
-        'train_recall': [], 'valid_recall': []
-    }
-    
-    for i in range(1, n_rounds + 1):
-        # Predict using first i trees
-        y_train_pred = (model.predict_proba(X_train, num_iteration=i)[:, 1] >= 0.5).astype(int)
-        y_valid_pred = (model.predict_proba(X_valid, num_iteration=i)[:, 1] >= 0.5).astype(int)
-        
-        # Compute metrics
-        metrics['train_f1'].append(f1_score(y_train, y_train_pred, zero_division=0))
-        metrics['valid_f1'].append(f1_score(y_valid, y_valid_pred, zero_division=0))
-        metrics['train_precision'].append(precision_score(y_train, y_train_pred, zero_division=0))
-        metrics['valid_precision'].append(precision_score(y_valid, y_valid_pred, zero_division=0))
-        metrics['train_recall'].append(recall_score(y_train, y_train_pred, zero_division=0))
-        metrics['valid_recall'].append(recall_score(y_valid, y_valid_pred, zero_division=0))
-    
-    return metrics
-
-
-def plot_f1_curves(metrics, save_path):
-    """Plot training and validation F1 score curves over boosting rounds"""
-    plt.figure(figsize=(10, 6))
-    plt.plot(metrics['train_f1'], label='Training F1', color='blue')
-    plt.plot(metrics['valid_f1'], label='Validation F1', color='orange')
-    plt.xlabel('Boosting Round')
-    plt.ylabel('F1 Score')
-    plt.title('LightGBM Training History - F1 Score')
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-    
-    print(f"F1 curves saved to {save_path}")
-
-
-def plot_precision_curves(metrics, save_path):
-    """Plot training and validation precision curves over boosting rounds"""
-    plt.figure(figsize=(10, 6))
-    plt.plot(metrics['train_precision'], label='Training Precision', color='blue')
-    plt.plot(metrics['valid_precision'], label='Validation Precision', color='orange')
-    plt.xlabel('Boosting Round')
-    plt.ylabel('Precision')
-    plt.title('LightGBM Training History - Precision')
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-    
-    print(f"Precision curves saved to {save_path}")
-
-
-def plot_recall_curves(metrics, save_path):
-    """Plot training and validation recall curves over boosting rounds"""
-    plt.figure(figsize=(10, 6))
-    plt.plot(metrics['train_recall'], label='Training Recall', color='blue')
-    plt.plot(metrics['valid_recall'], label='Validation Recall', color='orange')
-    plt.xlabel('Boosting Round')
-    plt.ylabel('Recall')
-    plt.title('LightGBM Training History - Recall')
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(save_path)
-    plt.close()
-    
-    print(f"Recall curves saved to {save_path}")
 
 
 # ============ Experiment Setup ============
@@ -204,14 +53,13 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
         print(f"Experiment folder: {exp_folder}")
         print(f"{'='*50}")
         
-        # Load and split data
-        df = load_data(data_path)
-        train, valid, test = time_based_split(df)
-        mlflow.log_param("data_splits", {
-            "train": len(train),
-            "valid": len(valid),
-            "test": len(test)
-        })
+        # Load and split data using DataLoader
+        data_loader = DataLoader(data_path)
+        data_loader.load_data()
+        train, valid, test = data_loader.time_based_split()
+        features = data_loader.get_features()
+        
+        mlflow.log_param("data_splits", data_loader.get_split_sizes())
         
         # Log dataset as artifact
         mlflow.log_artifact(data_path, artifact_path="datasets")
@@ -225,25 +73,28 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
         mlflow.log_artifact(f"{exp_folder}/test_split.csv", artifact_path="datasets")
         
         # Log dataset metadata
-        mlflow.log_param("dataset_shape", df.shape)
-        mlflow.log_param("target_distribution", {
-            "opened_0": int((df["opened"] == 0).sum()),
-            "opened_1": int((df["opened"] == 1).sum())
-        })
+        mlflow.log_param("dataset_shape", data_loader.df.shape)
+        mlflow.log_param("target_distribution", data_loader.get_target_distribution())
         
         # Prepare X, y (no scaling needed for tree-based models)
-        features = get_feature_columns()
-        X_train, y_train = train[features].values, train["opened"].values
-        X_valid, y_valid = valid[features].values, valid["opened"].values
-        X_test, y_test = test[features].values, test["opened"].values
+        X_train, y_train = data_loader.get_X_y("train")
+        X_valid, y_valid = data_loader.get_X_y("valid")
+        X_test, y_test = data_loader.get_X_y("test")
+        
+        # Convert to numpy arrays for LightGBM
+        X_train, y_train = X_train.values, y_train.values
+        X_valid, y_valid = X_valid.values, y_valid.values
+        X_test, y_test = X_test.values, y_test.values
+        
         mlflow.log_param("features", features)
         
         # Extract early stopping rounds from hyperparams
-        early_stopping_rounds = hyperparams.pop("early_stopping_rounds", None)
+        hyperparams_copy = hyperparams.copy()
+        early_stopping_rounds = hyperparams_copy.pop("early_stopping_rounds", None)
         
         # Train LightGBM model
         print("\nTraining LightGBM model...")
-        model = LGBMClassifier(**hyperparams)
+        model = LGBMClassifier(**hyperparams_copy)
         
         # Fit with early stopping using validation set
         evals_result = {}
@@ -257,9 +108,6 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
                 lgb.record_evaluation(evals_result)
             ]
         )
-        
-        # Restore early_stopping_rounds for logging
-        hyperparams["early_stopping_rounds"] = early_stopping_rounds
         
         # Log model to MLflow with registration
         mlflow.lightgbm.log_model(
@@ -373,11 +221,7 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
             "model_type": "LightGBM",
             "hyperparams": hyperparams,
             "features": features,
-            "data_splits": {
-                "train": len(train),
-                "valid": len(valid),
-                "test": len(test)
-            },
+            "data_splits": data_loader.get_split_sizes(),
             "best_iteration": model.best_iteration_,
             "train_metrics": train_metrics,
             "valid_metrics": valid_metrics
