@@ -125,6 +125,20 @@ class FeatureEngineering:
         df["hour_x_delay_since_last_open_notification"] = df["hour"] * df["delay_since_last_open_notification"]
         return df
 
+    def calc_user_fatigue_ratio(self, df: pd.DataFrame) -> pd.DataFrame:
+        g = df.groupby("user_id")
+        cumulative_sends = g.cumcount()
+        cumulative_opens = g["opened"].cumsum()
+
+        df["user_fatigue_ratio"] = (
+            cumulative_sends.shift(1) /
+            (cumulative_opens.shift(1) + 1)
+        )
+
+        return df
+
+
+
 def feature_engineering_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     """
     Pipeline for feature engineering
@@ -146,6 +160,9 @@ def feature_engineering_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     # Create time buckets and bucket-specific open rates
     df = feature_engineering.create_time_buckets(df.copy())
     df = feature_engineering.calc_user_bucket_open_rates(df.copy())
+
+    # Calculate overall user fatigue ratio (cumulative opens/sends)
+    df = feature_engineering.calc_user_fatigue_ratio(df.copy())
 
     df = feature_engineering.calc_hour_cyclical(df.copy())
 
