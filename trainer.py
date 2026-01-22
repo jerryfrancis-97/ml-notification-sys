@@ -30,6 +30,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import precision_recall_curve
 from lightgbm import LGBMClassifier
 
 # Import project modules
@@ -39,7 +40,7 @@ from viz_utils import (
     plot_pr_curve, plot_roc_curve, plot_coefficients,
     plot_feature_importance, plot_training_history, plot_accuracy_curves,
     compute_metrics_per_round, plot_f1_curves, plot_precision_curves,
-    plot_recall_curves, plot_loss_learning_curve_lgbm
+    plot_recall_curves, plot_loss_learning_curve_lgbm, plot_threshold_vs_pr
 )
 from analysis_utils import export_confusion_matrix_splits
 import warnings
@@ -74,11 +75,16 @@ def load_config(config_path):
 # These should match the columns created by feature_engg.py
 
 FEATURE_COLUMNS = [
-    "num_notifications_last_24h", 
+    "num_notifications_last_24h",
     "delay_since_last_open_notification",
-    "user_open_rate", 
-    "user_hour_open_rate", 
-    "hour_sin", 
+    "user_open_rate",
+    "user_hour_open_rate",
+    # Time bucket-specific open rates
+    "user_morning_open_rate",
+    "user_afternoon_open_rate",
+    "user_evening_open_rate",
+    "user_night_open_rate",
+    "hour_sin",
     "hour_cos",
     # Interaction features
     "hour_x_user_open_rate",
@@ -88,7 +94,14 @@ FEATURE_COLUMNS = [
 ]
 
 # Columns that need imputation (may have NaN values)
-IMPUTE_COLUMNS = ["user_open_rate", "user_hour_open_rate"]
+IMPUTE_COLUMNS = [
+    "user_open_rate",
+    "user_hour_open_rate",
+    "user_morning_open_rate",
+    "user_afternoon_open_rate",
+    "user_evening_open_rate",
+    "user_night_open_rate"
+]
 
 
 # ============ Custom Transformer ============
@@ -137,6 +150,18 @@ class FeatureImputerTransformer(BaseEstimator, TransformerMixin):
         """Return feature names for sklearn compatibility"""
         return input_features
 
+    def get_imputation_report(self, feature_names=None):
+        """Return detailed imputation statistics for logging"""
+        if feature_names is None:
+            feature_names = [f'feature_{i}' for i in range(len(self.statistics_))]
+
+        return {
+            "strategy": self.strategy,
+            "statistics": dict(zip(feature_names, self.statistics_)),
+            "features_with_missing": [name for name, stat in zip(feature_names, self.statistics_)
+                                    if not np.isnan(stat)]
+        }
+
 
 # ============ Pipeline Builder ============
 
@@ -149,7 +174,7 @@ class TrainingStrategy(ABC):
         pass
 
     @abstractmethod
-    def train(self, pipeline, X_train, y_train, X_valid, y_valid, exp_folder, features, hyperparams):
+    def train(self, pipeline, X_train, y_train, X_valid, y_valid, exp_folder, features, hyperparams, data_splits):
         """Train the model and generate all artifacts"""
         pass
 
@@ -166,7 +191,7 @@ class LogisticRegressionStrategy(TrainingStrategy):
         ])
         return pipeline
 
-    def train(self, pipeline, X_train, y_train, X_valid, y_valid, exp_folder, features, hyperparams):
+    def train(self, pipeline, X_train, y_train, X_valid, y_valid, exp_folder, features, hyperparams, data_splits):
         """Train LogisticRegression pipeline and generate all artifacts"""
         print("\n" + "="*50)
         print("Training Logistic Regression Pipeline")
@@ -184,11 +209,19 @@ class LogisticRegressionStrategy(TrainingStrategy):
         X_train_imputed = imputer.transform(X_train)
         X_train_scaled = scaler.transform(X_train_imputed)
 
-        # Predictions
+        # Get imputed validation data for confusion matrix analysis
+        X_valid_imputed = imputer.transform(X_valid)
+
+        # Create imputed validation DataFrame for confusion matrix analysis
+        X_valid_imputed_df = data_splits['valid_df'].copy()
+        X_valid_imputed_df[FEATURE_COLUMNS] = X_valid_imputed
+
+        # Predictions using custom threshold
         y_train_pred = pipeline.predict(X_train)
-        y_train_proba = pipeline.predict_proba(X_train)[:, 1]
         y_valid_pred = pipeline.predict(X_valid)
+        y_train_proba = pipeline.predict_proba(X_train)[:, 1]
         y_valid_proba = pipeline.predict_proba(X_valid)[:, 1]
+
 
         # Evaluate
         train_metrics = evaluate_model(y_train, y_train_pred, "Training")
@@ -243,6 +276,17 @@ class LogisticRegressionStrategy(TrainingStrategy):
         mlflow.log_metric("train_roc_auc", train_roc_auc)
         mlflow.log_metric("valid_roc_auc", valid_roc_auc)
 
+        # Threshold vs Precision/Recall analysis
+        print("Generating threshold vs PR analysis...")
+        train_optimal_thresh, train_max_f1 = plot_threshold_vs_pr(
+            y_train, y_train_proba, f"{exp_folder}/threshold_pr_analysis_train.png", "Training"
+        )
+        valid_optimal_thresh, valid_max_f1 = plot_threshold_vs_pr(
+            y_valid, y_valid_proba, f"{exp_folder}/threshold_pr_analysis_valid.png", "Validation"
+        )
+        mlflow.log_artifact(f"{exp_folder}/threshold_pr_analysis_train.png")
+        mlflow.log_artifact(f"{exp_folder}/threshold_pr_analysis_valid.png")
+
         # Coefficients
         coef_df = plot_coefficients(classifier, features, f"{exp_folder}/coefficients.png")
         coef_df.to_csv(f"{exp_folder}/coefficients.csv", index=False)
@@ -253,7 +297,8 @@ class LogisticRegressionStrategy(TrainingStrategy):
             "train_metrics": train_metrics,
             "valid_metrics": valid_metrics,
             "y_valid_pred": y_valid_pred,
-            "y_valid_proba": y_valid_proba
+            "y_valid_proba": y_valid_proba,
+            "X_valid_imputed_df": X_valid_imputed_df
         }
 
 
@@ -268,7 +313,7 @@ class LightGBMStrategy(TrainingStrategy):
         ])
         return pipeline
 
-    def train(self, pipeline, X_train, y_train, X_valid, y_valid, exp_folder, features, hyperparams):
+    def train(self, pipeline, X_train, y_train, X_valid, y_valid, exp_folder, features, hyperparams, data_splits):
         """Train LightGBM pipeline and generate all artifacts"""
         print("\n" + "="*50)
         print("Training LightGBM Pipeline")
@@ -285,6 +330,10 @@ class LightGBMStrategy(TrainingStrategy):
 
         print(f"\nImputed training data shape: {X_train_imputed.shape}")
         print(f"Imputed validation data shape: {X_valid_imputed.shape}")
+
+        # Create imputed validation DataFrame for confusion matrix analysis
+        X_valid_imputed_df = data_splits['valid_df'].copy()
+        X_valid_imputed_df[FEATURE_COLUMNS] = X_valid_imputed
 
         # Get hyperparams and handle early stopping
         lgbm_params = hyperparams.copy()
@@ -402,7 +451,8 @@ class LightGBMStrategy(TrainingStrategy):
             "train_metrics": train_metrics,
             "valid_metrics": valid_metrics,
             "y_valid_pred": y_valid_pred,
-            "y_valid_proba": y_valid_proba
+            "y_valid_proba": y_valid_proba,
+            "X_valid_imputed_df": X_valid_imputed_df
         }
 
 
@@ -576,8 +626,12 @@ class TrainingPipeline(ABC):
     def _generate_additional_artifacts(self, results, data_splits, exp_folder):
         """Common additional artifact generation"""
         print("\n[Step 4] Exporting confusion matrix splits for qualitative analysis...")
+
+        # Use imputed validation data for confusion matrix analysis (matches what model saw)
+        imputed_valid_df = results.get("X_valid_imputed_df", data_splits['valid_df'])
+
         cm_splits = export_confusion_matrix_splits(
-            data_splits['valid'][1], results["y_valid_pred"], data_splits['valid_df'], exp_folder, "valid"
+            data_splits['valid'][1], results["y_valid_pred"], imputed_valid_df, exp_folder, "valid"
         )
         for category, path in cm_splits.items():
             mlflow.log_artifact(path, artifact_path="confusion_matrix_analysis")
@@ -585,6 +639,22 @@ class TrainingPipeline(ABC):
     def _save_experiment_summary(self, args, data_splits, results, timestamp, dvc_info, exp_folder):
         """Common experiment summary saving"""
         print("\n[Step 5] Saving experiment summary...")
+
+        # Extract imputation statistics from the fitted pipeline
+        pipeline = results.get("pipeline")
+        if pipeline:
+            imputer = pipeline.named_steps['imputer']
+            imputation_stats = imputer.get_imputation_report(FEATURE_COLUMNS)
+
+            # Save imputation statistics as artifact
+            stats_path = f"{exp_folder}/imputation_statistics.json"
+            with open(stats_path, 'w') as f:
+                json.dump(imputation_stats, f, indent=2)
+            mlflow.log_artifact(stats_path)
+            print(f"  Saved imputation statistics to: {stats_path}")
+        else:
+            imputation_stats = None
+
         experiment_summary = {
             "experiment_name": args.experiment,
             "run_name": f"{args.model}_run_{timestamp}",
@@ -597,6 +667,7 @@ class TrainingPipeline(ABC):
             "test_size": len(data_splits['test'][0]),
             "train_metrics": results["train_metrics"],
             "valid_metrics": results["valid_metrics"],
+            "imputation_stats": imputation_stats,
             "dvc_info": dvc_info
         }
 
@@ -632,11 +703,15 @@ class LogisticRegressionPipeline(TrainingPipeline):
 
         results = self.strategy.train(
             pipeline, X_train, y_train, X_valid, y_valid,
-            exp_folder, FEATURE_COLUMNS, args.hyperparams
+            exp_folder, FEATURE_COLUMNS, args.hyperparams,
+            data_splits
         )
 
         # Log the entire pipeline
         mlflow.sklearn.log_model(pipeline, "model_pipeline")
+
+        # Include pipeline in results for imputation statistics
+        results["pipeline"] = pipeline
 
         return results
 
@@ -661,16 +736,18 @@ class LightGBMPipeline(TrainingPipeline):
 
         results = self.strategy.train(
             pipeline, X_train, y_train, X_valid, y_valid,
-            exp_folder, FEATURE_COLUMNS, args.hyperparams
+            exp_folder, FEATURE_COLUMNS, args.hyperparams, data_splits
         )
 
         # Log the pipeline (note: LightGBM may need special handling)
         mlflow.sklearn.log_model(pipeline, "model_pipeline")
 
+        # Include pipeline in results for imputation statistics
+        results["pipeline"] = pipeline
+
         return results
 
 
-# ============ Factory Pattern for Creating Pipelines ============
 
 class TrainerFactory:
     """Factory for creating training pipelines"""
@@ -705,9 +782,6 @@ class TrainerFactory:
         return pipeline_class(strategy)
 
 
-# ============ Main Training Orchestration ============
-
-
 def lgb_early_stopping_callback(stopping_rounds):
     """Create LightGBM early stopping callback"""
     from lightgbm import early_stopping
@@ -720,12 +794,9 @@ def lgb_record_evaluation_callback(evals_result):
     return record_evaluation(evals_result)
 
 
-# ============ Main Training Orchestration ============
-
 def run_training(args):
     """
-    Main training function that uses the factory pattern to create
-    the appropriate training pipeline and execute it.
+    Main training function to create the appropriate training pipeline and execute it.
     """
     # Create the training pipeline using the factory
     pipeline = TrainerFactory.create_pipeline(args.model)
@@ -733,8 +804,6 @@ def run_training(args):
     # Execute the training workflow
     return pipeline.run_training(args)
 
-
-# ============ CLI Entry Point ============
 
 def parse_args():
     """Parse command line arguments"""
@@ -804,7 +873,6 @@ def parse_args():
             parser.error("--model is required when not using --config")
         args.hyperparams = None  # Will use defaults in run_training
         args.config_path = None
-        
         # Set default experiment name based on model
         if args.experiment is None:
             args.experiment = f"notification_{args.model}"
