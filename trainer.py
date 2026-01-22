@@ -41,6 +41,8 @@ from viz_utils import (
     plot_recall_curves, plot_loss_learning_curve_lgbm
 )
 from analysis_utils import export_confusion_matrix_splits
+import warnings
+warnings.filterwarnings("ignore")
 
 load_dotenv(".env")
 
@@ -539,6 +541,8 @@ def run_training(args):
             # Use hyperparams from config if provided, otherwise use defaults
             if hasattr(args, 'hyperparams') and args.hyperparams:
                 hyperparams = args.hyperparams
+                if hyperparams["penalty"] == "None":
+                    hyperparams["penalty"] = None
                 print("  Using hyperparams from config file")
             else:
                 raise ValueError("Hyperparams are required for Logistic Regression")
