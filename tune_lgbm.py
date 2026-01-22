@@ -157,11 +157,12 @@ def run_tuning(n_trials: int = 100):
         
         print(f"\nBest model plots saved to: {plot_dir}")
     
-    optuna.visualization.plot_optimization_history(study).savefig("optimization_history.png")
+    fig1 = optuna.visualization.plot_optimization_history(study)
+    fig1.write_image("optimization_history.png")
+    fig2 = optuna.visualization.plot_param_importances(study)
+    fig2.write_image("param_importances.png")
     mlflow.log_artifact("optimization_history.png")
-    optuna.visualization.plot_param_importances(study).savefig("param_importances.png")
     mlflow.log_artifact("param_importances.png")
-
 
     return study
 
