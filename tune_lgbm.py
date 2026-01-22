@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 import optuna
 from optuna.integration import LightGBMPruningCallback
 import lightgbm as lgb
@@ -75,7 +76,11 @@ def run_tuning(n_trials: int = 100):
     print(f"Best trial: {study.best_trial}")
     print(f"Best value: {study.best_value}")
 
-    with mlflow.start_run(run_name="best_lgbm_from_hpo"):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    run_name = f"run_{timestamp}"
+    
+    with mlflow.start_run(run_name=run_name):
+        mlflow.set_tag("mlflow.note.content", "best_lgbm_from_hpo")
         mlflow.log_params(study.best_params)
         mlflow.log_metric("best_f1_from_optuna", study.best_value)
 
