@@ -59,35 +59,59 @@ python tune_lgbm.py      # LightGBM HPO
 python decision_engine.py
 ```
 
-## Experiment Results
 
-### Model Comparison (Validation Set)
+## Data Versioning with DVC
 
-| Model | Accuracy | Precision | Recall | F1 Score |
-|-------|----------|-----------|--------|----------|
-| Logistic Regression | 0.644 | 0.354 | 0.497 | 0.413 |
-| LightGBM (default) | 0.686 | 0.412 | 0.576 | **0.481** |
-| LightGBM (HPO best) | **0.765** | **0.778** | 0.093 | 0.166 |
+We use [DVC (Data Version Control)](https://dvc.org/) to track and version large data files alongside Git.
 
-### Key Observations
+### Initial Setup (one-time)
 
-- **LightGBM (default)** achieves the best F1 score (0.481) with balanced precision/recall
-- **LightGBM (HPO)** optimized for F1 but converged to high-precision/low-recall (conservative predictions)
-- **Logistic Regression** provides a solid baseline with interpretable coefficients
+```bash
+# Install DVC
+pip install dvc
 
-### Features Used
+# Initialize DVC in your repo (already done)
+dvc init
 
-| Feature | Description |
-|---------|-------------|
-| `hour`, `hour_sin`, `hour_cos` | Time of day (cyclical encoding) |
-| `day_of_week`, `is_weekend` | Day information |
-| `num_notifications_last_24h` | Notification fatigue indicator |
-| `delay_since_last_open_notification` | Recency of engagement |
-| `user_open_rate` | Historical user engagement rate |
-| `user_hour_open_rate` | User's hour-specific engagement pattern |
+# Add remote storage (local folder in this case)
+dvc remote add -d myremote data/files
+```
 
-### Data Split
+### Adding a New Dataset Version
 
-- **Train**: 2,100 samples (70%)
-- **Validation**: 599 samples (20%)
-- **Test**: 301 samples (10%)
+Whenever you update or add new data files:
+
+```bash
+# 1. Add the data file to DVC tracking
+dvc add data/your_new_file.csv
+
+# 2. Stage the .dvc pointer file and updated .gitignore
+git add data/your_new_file.csv.dvc data/.gitignore
+
+# 3. Commit the changes to Git
+git commit -m "Add new dataset version: your_new_file.csv"
+
+# 4. Push data to DVC remote storage
+dvc push
+
+# 5. Push code changes to Git remote
+git push
+```
+
+### Pulling Data (for collaborators)
+
+```bash
+# After cloning the repo, pull the actual data files
+git pull
+dvc pull
+```
+
+### Switching Between Dataset Versions
+
+```bash
+# Checkout a specific Git commit/tag
+git checkout <commit-hash>
+
+# Pull the corresponding data version
+dvc checkout
+```
