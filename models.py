@@ -10,7 +10,8 @@ from dotenv import load_dotenv
 # Import from utility modules
 from data_utils import DataLoader, evaluate_model, load_data, get_feature_columns, time_based_split
 from viz_utils import (
-    plot_confusion_matrix, plot_learning_curve, plot_pr_curve, plot_roc_curve
+    plot_confusion_matrix, plot_learning_curve, plot_loss_learning_curve,
+    plot_pr_curve, plot_roc_curve
 )
 from analysis_utils import export_confusion_matrix_splits
 
@@ -94,6 +95,12 @@ def run_experiment(data_path, model_class, hyperparams, experiment_name):
         plot_learning_curve(model, X_train_scaled, y_train, 
                            f"{exp_folder}/learning_curve.png", cv=5)
         mlflow.log_artifact(f"{exp_folder}/learning_curve.png")
+        
+        # Plot loss learning curve
+        print("Generating loss learning curve...")
+        plot_loss_learning_curve(model, X_train_scaled, y_train,
+                                f"{exp_folder}/learning_curve_loss.png", cv=5)
+        mlflow.log_artifact(f"{exp_folder}/learning_curve_loss.png")
         
         # Evaluate on training set
         y_train_pred = model.predict(X_train_scaled)

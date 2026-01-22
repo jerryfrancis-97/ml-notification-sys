@@ -67,6 +67,42 @@ def plot_learning_curve(model, X, y, save_path, cv=5):
     print(f"Learning curve saved to {save_path}")
 
 
+def plot_loss_learning_curve(model, X, y, save_path, cv=5):
+    """Plot learning curve showing train/validation log loss vs training size"""
+    train_sizes, train_scores, valid_scores = learning_curve(
+        model, X, y, 
+        train_sizes=np.linspace(0.1, 1.0, 10),
+        cv=cv,
+        scoring='neg_log_loss',
+        n_jobs=-1
+    )
+    
+    # neg_log_loss returns negative values, convert to positive for plotting
+    train_loss = -np.mean(train_scores, axis=1)
+    train_std = np.std(train_scores, axis=1)
+    valid_loss = -np.mean(valid_scores, axis=1)
+    valid_std = np.std(valid_scores, axis=1)
+    
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_sizes, train_loss, 'o-', color='blue', label='Training Loss')
+    plt.fill_between(train_sizes, train_loss - train_std, train_loss + train_std, 
+                     alpha=0.1, color='blue')
+    plt.plot(train_sizes, valid_loss, 'o-', color='orange', label='Cross-Validation Loss')
+    plt.fill_between(train_sizes, valid_loss - valid_std, valid_loss + valid_std, 
+                     alpha=0.1, color='orange')
+    
+    plt.xlabel('Training Set Size')
+    plt.ylabel('Log Loss')
+    plt.title('Learning Curve - Loss')
+    plt.legend(loc='upper right')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    
+    print(f"Loss learning curve saved to {save_path}")
+
+
 def plot_pr_curve(y_true, y_proba, save_path, split_name=""):
     """Plot Precision-Recall curve"""
     precision, recall, thresholds = precision_recall_curve(y_true, y_proba)
@@ -285,3 +321,64 @@ def plot_recall_curves(metrics, save_path):
     plt.close()
     
     print(f"Recall curves saved to {save_path}")
+
+
+def plot_loss_learning_curve_lgbm(X_train, y_train, X_valid, y_valid, hyperparams, save_path, n_sizes=10):
+    """
+    Plot learning curve showing train/validation log loss vs training set size for LightGBM.
+    Trains multiple models on different training set sizes.
+    
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_valid: Validation features
+        y_valid: Validation labels
+        hyperparams: LightGBM hyperparameters dict
+        save_path: Path to save the plot
+        n_sizes: Number of training sizes to evaluate
+    """
+    from lightgbm import LGBMClassifier
+    from sklearn.metrics import log_loss
+    
+    train_sizes_ratio = np.linspace(0.1, 1.0, n_sizes)
+    train_sizes = (train_sizes_ratio * len(X_train)).astype(int)
+    
+    train_losses = []
+    valid_losses = []
+    
+    # Remove early_stopping_rounds from hyperparams for this function
+    hyperparams_copy = hyperparams.copy()
+    hyperparams_copy.pop("early_stopping_rounds", None)
+    
+    print(f"Computing loss learning curve across {n_sizes} training sizes...")
+    
+    for size in train_sizes:
+        # Sample training data
+        X_train_subset = X_train[:size]
+        y_train_subset = y_train[:size]
+        
+        # Train model
+        model = LGBMClassifier(**hyperparams_copy, verbose=-1)
+        model.fit(X_train_subset, y_train_subset)
+        
+        # Compute losses
+        y_train_proba = model.predict_proba(X_train_subset)[:, 1]
+        y_valid_proba = model.predict_proba(X_valid)[:, 1]
+        
+        train_losses.append(log_loss(y_train_subset, y_train_proba))
+        valid_losses.append(log_loss(y_valid, y_valid_proba))
+    
+    # Plot
+    plt.figure(figsize=(10, 6))
+    plt.plot(train_sizes, train_losses, 'o-', color='blue', label='Training Loss')
+    plt.plot(train_sizes, valid_losses, 'o-', color='orange', label='Validation Loss')
+    plt.xlabel('Training Set Size')
+    plt.ylabel('Log Loss')
+    plt.title('LightGBM Learning Curve - Loss vs Training Size')
+    plt.legend(loc='upper right')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+    
+    print(f"Loss learning curve saved to {save_path}")

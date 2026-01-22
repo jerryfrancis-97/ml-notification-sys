@@ -12,7 +12,8 @@ from data_utils import DataLoader, evaluate_model
 from viz_utils import (
     plot_confusion_matrix, plot_pr_curve, plot_roc_curve,
     plot_feature_importance, plot_training_history, plot_accuracy_curves,
-    compute_metrics_per_round, plot_f1_curves, plot_precision_curves, plot_recall_curves
+    compute_metrics_per_round, plot_f1_curves, plot_precision_curves, plot_recall_curves,
+    plot_loss_learning_curve_lgbm
 )
 from analysis_utils import export_confusion_matrix_splits
 
@@ -124,6 +125,14 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
         # Plot accuracy curves
         plot_accuracy_curves(evals_result, f"{exp_folder}/accuracy_curves.png")
         mlflow.log_artifact(f"{exp_folder}/accuracy_curves.png")
+        
+        # Plot loss learning curve (loss vs training set size)
+        print("Generating loss learning curve...")
+        plot_loss_learning_curve_lgbm(
+            X_train, y_train, X_valid, y_valid, hyperparams,
+            f"{exp_folder}/learning_curve_loss.png"
+        )
+        mlflow.log_artifact(f"{exp_folder}/learning_curve_loss.png")
         
         # Compute F1, precision, recall per round
         print("Computing F1, precision, recall per round...")
