@@ -769,7 +769,7 @@ class LogisticRegressionPipeline(TrainingPipeline):
         )
 
         # Log the entire pipeline
-        mlflow.sklearn.log_model(pipeline, "model_pipeline")
+        mlflow.sklearn.log_model(sk_model=pipeline, name="model_pipeline")
 
         # Include pipeline in results for imputation statistics
         results["pipeline"] = pipeline
@@ -804,7 +804,7 @@ class LightGBMPipeline(TrainingPipeline):
         )
 
         # Log the pipeline (note: LightGBM may need special handling)
-        mlflow.sklearn.log_model(pipeline, "model_pipeline")
+        mlflow.sklearn.log_model(sk_model=pipeline, name="model_pipeline")
 
         # Include pipeline in results for imputation statistics
         results["pipeline"] = pipeline
@@ -935,11 +935,7 @@ def parse_args():
         # Validate that model is provided if no config
         if args.model is None:
             parser.error("--model is required when not using --config")
-        args.hyperparams = None  # Will use defaults in run_training
-        args.config_path = None
-        # Set default experiment name based on model
-        if args.experiment is None:
-            args.experiment = f"notification_{args.model}"
+        raise ValueError("No config file provided for training")
     
     return args
 
