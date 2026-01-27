@@ -17,6 +17,7 @@ import argparse
 import os
 import json
 import yaml
+import sys
 from datetime import datetime
 from abc import ABC, abstractmethod
 
@@ -45,8 +46,10 @@ from viz_utils import (
 from analysis_utils import export_confusion_matrix_splits
 import warnings
 warnings.filterwarnings("ignore")
-
+import logging
 load_dotenv(".env")
+
+# Logging will be configured in run_training method
 
 
 def detect_feature_columns(df: pd.DataFrame) -> tuple:
@@ -505,60 +508,90 @@ class TrainingPipeline(ABC):
         run_name = f"{args.model}_run_{timestamp}"
 
         with mlflow.start_run(run_name=run_name):
-            print("\n" + "="*60)
-            print(f"Starting Training Pipeline")
-            print(f"Model: {args.model.upper()}")
-            print(f"Experiment: {args.experiment}")
-            print(f"Run: {run_name}")
-            print("="*60)
-
-            # Log parameters
-            mlflow.log_param("model_type", args.model)
-            mlflow.log_param("data_path", args.data_path)
-            mlflow.log_param("train_ratio", args.train_ratio)
-            mlflow.log_param("valid_ratio", args.valid_ratio)
-
-            # Log DVC hash for data lineage
-            dvc_info = get_dvc_hash(args.data_path)
-            if dvc_info:
-                mlflow.log_param("data_dvc_md5", dvc_info['md5'])
-                mlflow.log_param("data_dvc_size", dvc_info['size'])
-                print(f"\nDVC Data Hash: {dvc_info['md5']}")
-                print(f"DVC Data Size: {dvc_info['size']}")
-
-            # Log config file if used
-            if hasattr(args, 'config_path') and args.config_path:
-                mlflow.log_artifact(args.config_path, artifact_path="config")
-                mlflow.log_param("config_file", args.config_path)
-                print(f"Config file: {args.config_path}")
-
-            # Create experiment folder
+            # Create experiment folder first for logging
             exp_folder = f"experiments/{args.experiment}/{timestamp}"
             os.makedirs(exp_folder, exist_ok=True)
             mlflow.log_param("experiment_folder", exp_folder)
 
-            # Step 1: Load and prepare data
-            data_splits = self._load_and_split_data(args, exp_folder)
+            # Configure logging to write to file (not console)
+            log_file = os.path.join(exp_folder, "training_log.txt")
+            logging.basicConfig(
+                level=logging.DEBUG,
+                format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                handlers=[
+                    logging.FileHandler(log_file, mode='w', encoding='utf-8'),
+                ],
+                force=True  # Override any existing configuration
+            )
+            logger = logging.getLogger(__name__)
+            
+            # Redirect stdout to log file so all print statements are captured
+            original_stdout = sys.stdout
+            log_file_handle = open(log_file, 'w', encoding='utf-8', buffering=1)  # Line buffered
+            sys.stdout = log_file_handle
+            
+            try:
+                print("="*60)
+                print(f"Starting Training Pipeline")
+                print(f"Model: {args.model.upper()}")
+                print(f"Experiment: {args.experiment}")
+                print(f"Run: {run_name}")
+                print("="*60)
+                print(f"Log file: {log_file}")
+                print()
 
-            # Step 2: Build and train pipeline
-            pipeline = self._build_pipeline(args)
-            results = self._train_model(pipeline, data_splits, exp_folder, args)
+                # Log parameters
+                mlflow.log_param("model_type", args.model)
+                mlflow.log_param("data_path", args.data_path)
+                mlflow.log_param("train_ratio", args.train_ratio)
+                mlflow.log_param("valid_ratio", args.valid_ratio)
 
-            # Step 3: Generate additional artifacts
-            self._generate_additional_artifacts(results, data_splits, exp_folder)
+                # Log DVC hash for data lineage
+                dvc_info = get_dvc_hash(args.data_path)
+                if dvc_info:
+                    mlflow.log_param("data_dvc_md5", dvc_info['md5'])
+                    mlflow.log_param("data_dvc_size", dvc_info['size'])
+                    logger.info(f"DVC Data Hash: {dvc_info['md5']}")
+                    logger.info(f"DVC Data Size: {dvc_info['size']}")
 
-            # Step 4: Save experiment summary
-            experiment_summary = self._save_experiment_summary(args, data_splits, results, timestamp, dvc_info, exp_folder)
+                # Log config file if used
+                if hasattr(args, 'config_path') and args.config_path:
+                    mlflow.log_artifact(args.config_path, artifact_path="config")
+                    mlflow.log_param("config_file", args.config_path)
+                    logger.info(f"Config file: {args.config_path}")
 
-            print("\n" + "="*60)
-            print("Training Complete!")
-            print("="*60)
-            print(f"\nResults saved to: {exp_folder}")
-            print(f"\nValidation Metrics:")
-            print(f"  Accuracy:  {results['valid_metrics']['accuracy']:.4f}")
-            print(f"  Precision: {results['valid_metrics']['precision']:.4f}")
-            print(f"  Recall:    {results['valid_metrics']['recall']:.4f}")
-            print(f"  F1 Score:  {results['valid_metrics']['f1']:.4f}")
+                # Step 1: Load and prepare data
+                data_splits = self._load_and_split_data(args, exp_folder)
+
+                # Step 2: Build and train pipeline
+                pipeline = self._build_pipeline(args)
+                results = self._train_model(pipeline, data_splits, exp_folder, args)
+
+                # Step 3: Generate additional artifacts
+                self._generate_additional_artifacts(results, data_splits, exp_folder)
+
+                # Step 4: Save experiment summary
+                experiment_summary = self._save_experiment_summary(args, data_splits, results, timestamp, dvc_info, exp_folder)
+
+                print("\n" + "="*60)
+                print("Training Complete!")
+                print("="*60)
+                print(f"\nResults saved to: {exp_folder}")
+                print(f"\nValidation Metrics:")
+                print(f"  Accuracy:  {results['valid_metrics']['accuracy']:.4f}")
+                print(f"  Precision: {results['valid_metrics']['precision']:.4f}")
+                print(f"  Recall:    {results['valid_metrics']['recall']:.4f}")
+                print(f"  F1 Score:  {results['valid_metrics']['f1']:.4f}")
+                
+            finally:
+                # Flush and close log file before logging as artifact
+                log_file_handle.flush()
+                sys.stdout = original_stdout
+                log_file_handle.close()
+                
+                # Log the training log file as an artifact
+                mlflow.log_artifact(log_file, artifact_path="logs")
+                print(f"\nTraining logs saved to: {log_file}")
 
             return experiment_summary
 
