@@ -247,8 +247,16 @@ def compute_metrics_per_round(model, X_train, y_train, X_valid, y_valid):
     """
     Compute F1, precision, and recall at each boosting round for train and validation.
     Returns dict with metrics arrays for plotting.
+    Supports both LightGBM and XGBoost models.
     """
-    n_rounds = model.n_estimators_
+    from lightgbm import LGBMClassifier
+    from xgboost import XGBClassifier
+    
+    n_rounds = model.n_estimators_ if hasattr(model, 'n_estimators_') else model.n_estimators
+    
+    # Detect model type
+    is_lgbm = isinstance(model, LGBMClassifier)
+    is_xgb = isinstance(model, XGBClassifier)
     
     metrics = {
         'train_f1': [], 'valid_f1': [],
@@ -257,9 +265,22 @@ def compute_metrics_per_round(model, X_train, y_train, X_valid, y_valid):
     }
     
     for i in range(1, n_rounds + 1):
-        # Predict using first i trees
-        y_train_pred = (model.predict_proba(X_train, num_iteration=i)[:, 1] >= 0.5).astype(int)
-        y_valid_pred = (model.predict_proba(X_valid, num_iteration=i)[:, 1] >= 0.5).astype(int)
+        # Predict using first i trees - different API for LightGBM vs XGBoost
+        if is_lgbm:
+            # LightGBM uses num_iteration parameter
+            y_train_pred = (model.predict_proba(X_train, num_iteration=i)[:, 1] >= 0.5).astype(int)
+            y_valid_pred = (model.predict_proba(X_valid, num_iteration=i)[:, 1] >= 0.5).astype(int)
+        elif is_xgb:
+            if i > model.best_iteration:
+                continue;
+                # xgboost has no end_iteration param for this
+            # XGBoost uses iteration_range parameter (end is exclusive, so i+1)
+            y_train_pred = (model.predict_proba(X_train, iteration_range=(0, i))[:, 1] >= 0.5).astype(int)
+            y_valid_pred = (model.predict_proba(X_valid, iteration_range=(0, i))[:, 1] >= 0.5).astype(int)
+        else:
+            # Fallback: use all trees (can't specify iteration for other models)
+            y_train_pred = (model.predict_proba(X_train)[:, 1] >= 0.5).astype(int)
+            y_valid_pred = (model.predict_proba(X_valid)[:, 1] >= 0.5).astype(int)
         
         # Compute metrics
         metrics['train_f1'].append(f1_score(y_train, y_train_pred, zero_division=0))
