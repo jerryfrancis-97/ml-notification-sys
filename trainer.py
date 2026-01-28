@@ -5,12 +5,13 @@ This module provides a complete ML training pipeline that:
 1. Loads feature-engineered data from feature-engg CSV
 2. Performs time-based split (BEFORE imputation)
 3. Uses sklearn Pipeline to ensure imputer fits ONLY on training data
-4. Trains LogisticRegression or LightGBM models
+4. Trains LogisticRegression, LightGBM, or XGBoost models
 5. Logs all metrics, artifacts, and visualizations to MLflow
 
 Usage:
     python trainer.py --model logreg --data_path data/training_data_features.csv
     python trainer.py --model lgbm --data_path data/training_data_features.csv
+    python trainer.py --model xgb --data_path data/training_data_features.csv
 """
 
 import argparse
@@ -24,7 +25,11 @@ from abc import ABC, abstractmethod
 import pandas as pd
 import numpy as np
 import mlflow
+import shap
+import matplotlib.pyplot as plt
 from dotenv import load_dotenv
+
+plt.switch_backend('Agg')  # Non-interactive backend for SHAP plots
 
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.impute import SimpleImputer
@@ -33,6 +38,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import precision_recall_curve
 from lightgbm import LGBMClassifier
+from xgboost import XGBClassifier
 
 # Import project modules
 from data_utils import time_based_split, evaluate_model, get_dvc_hash
@@ -478,6 +484,152 @@ class LightGBMStrategy(TrainingStrategy):
         }
 
 
+class XGBoostStrategy(TrainingStrategy):
+    """Strategy for training XGBoost models"""
+
+    def build_pipeline(self, hyperparams):
+        """Build sklearn Pipeline for XGBoost"""
+        pipeline = Pipeline([
+            ('imputer', FeatureImputerTransformer(strategy='mean')),
+            ('classifier', XGBClassifier(**hyperparams))
+        ])
+        return pipeline
+
+    def train(self, pipeline, X_train, y_train, X_valid, y_valid, exp_folder, features, hyperparams, data_splits):
+        """Train XGBoost pipeline and generate all artifacts"""
+        print("\n" + "="*50)
+        print("Training XGBoost Pipeline")
+        print("="*50)
+
+        # For XGBoost with early stopping, we need to handle it differently
+        # First fit the imputer on training data
+        imputer = pipeline.named_steps['imputer']
+        imputer.fit(X_train)
+
+        # Transform both train and valid using TRAINING statistics
+        X_train_imputed = imputer.transform(X_train)
+        X_valid_imputed = imputer.transform(X_valid)
+
+        print(f"\nImputed training data shape: {X_train_imputed.shape}")
+        print(f"Imputed validation data shape: {X_valid_imputed.shape}")
+
+        # Create imputed validation DataFrame for confusion matrix analysis
+        X_valid_imputed_df = data_splits['valid_df'].copy()
+        X_valid_imputed_df[features] = X_valid_imputed
+
+        # Get hyperparams and handle early stopping
+        xgb_params = hyperparams.copy()
+        early_stopping_rounds = xgb_params.pop("early_stopping_rounds", 50)
+
+        # Create and train XGBoost model with early stopping
+        classifier = XGBClassifier(**xgb_params)
+
+        # Fit with early stopping (sklearn-compatible interface)
+        #overlaoding classifier var
+        classifier = classifier.fit(
+            X_train_imputed, y_train,
+            eval_set=[(X_valid_imputed, y_valid)],
+            early_stopping_rounds=early_stopping_rounds,
+            verbose=False
+        )
+
+        # Get evaluation results from classifier
+        evals_result = classifier.evals_result_ if hasattr(classifier, 'evals_result_') else {}
+
+        # Update the pipeline's classifier with the trained one
+        pipeline.named_steps['classifier'] = classifier
+
+        # Predictions
+        y_train_pred = classifier.predict(X_train_imputed)
+        y_train_proba = classifier.predict_proba(X_train_imputed)[:, 1]
+        y_valid_pred = classifier.predict(X_valid_imputed)
+        y_valid_proba = classifier.predict_proba(X_valid_imputed)[:, 1]
+
+        # Evaluate
+        train_metrics = evaluate_model(y_train, y_train_pred, "Training")
+        valid_metrics = evaluate_model(y_valid, y_valid_pred, "Validation")
+
+        # Log metrics to MLflow
+        for prefix, metrics in [("train", train_metrics), ("valid", valid_metrics)]:
+            mlflow.log_metric(f"{prefix}_accuracy", metrics["accuracy"])
+            mlflow.log_metric(f"{prefix}_precision", metrics["precision"])
+            mlflow.log_metric(f"{prefix}_recall", metrics["recall"])
+            mlflow.log_metric(f"{prefix}_f1", metrics["f1"])
+
+        # Log XGBoost specific info
+        if hasattr(classifier, 'best_iteration'):
+            mlflow.log_metric("best_iteration", classifier.best_iteration)
+        mlflow.log_metric("n_estimators_used", classifier.n_estimators)
+
+        # Generate visualizations
+        print("\nGenerating visualizations...")
+
+        # Confusion matrices
+        plot_confusion_matrix(y_train, y_train_pred,
+                             f"{exp_folder}/confusion_matrix_train.png", "Training")
+        plot_confusion_matrix(y_valid, y_valid_pred,
+                             f"{exp_folder}/confusion_matrix_valid.png", "Validation")
+        mlflow.log_artifact(f"{exp_folder}/confusion_matrix_train.png")
+        mlflow.log_artifact(f"{exp_folder}/confusion_matrix_valid.png")
+
+        # Training history (if available)
+        if evals_result:
+            plot_training_history(evals_result, f"{exp_folder}/training_history.png")
+            mlflow.log_artifact(f"{exp_folder}/training_history.png")
+
+            # Accuracy curves
+            plot_accuracy_curves(evals_result, f"{exp_folder}/accuracy_curves.png")
+            mlflow.log_artifact(f"{exp_folder}/accuracy_curves.png")
+
+        # Compute per-round metrics for F1, precision, recall curves
+        print("Computing per-round metrics...")
+        metrics_per_round = compute_metrics_per_round(
+            classifier, X_train_imputed, y_train, X_valid_imputed, y_valid
+        )
+
+        plot_f1_curves(metrics_per_round, f"{exp_folder}/f1_curves.png")
+        plot_precision_curves(metrics_per_round, f"{exp_folder}/precision_curves.png")
+        plot_recall_curves(metrics_per_round, f"{exp_folder}/recall_curves.png")
+        mlflow.log_artifact(f"{exp_folder}/f1_curves.png")
+        mlflow.log_artifact(f"{exp_folder}/precision_curves.png")
+        mlflow.log_artifact(f"{exp_folder}/recall_curves.png")
+
+        # PR curves
+        train_pr_auc = plot_pr_curve(y_train, y_train_proba,
+                                     f"{exp_folder}/pr_curve_train.png", "Training")
+        valid_pr_auc = plot_pr_curve(y_valid, y_valid_proba,
+                                     f"{exp_folder}/pr_curve_valid.png", "Validation")
+        mlflow.log_artifact(f"{exp_folder}/pr_curve_train.png")
+        mlflow.log_artifact(f"{exp_folder}/pr_curve_valid.png")
+        mlflow.log_metric("train_pr_auc", train_pr_auc)
+        mlflow.log_metric("valid_pr_auc", valid_pr_auc)
+
+        # ROC curves
+        train_roc_auc = plot_roc_curve(y_train, y_train_proba,
+                                       f"{exp_folder}/roc_curve_train.png", "Training")
+        valid_roc_auc = plot_roc_curve(y_valid, y_valid_proba,
+                                       f"{exp_folder}/roc_curve_valid.png", "Validation")
+        mlflow.log_artifact(f"{exp_folder}/roc_curve_train.png")
+        mlflow.log_artifact(f"{exp_folder}/roc_curve_valid.png")
+        mlflow.log_metric("train_roc_auc", train_roc_auc)
+        mlflow.log_metric("valid_roc_auc", valid_roc_auc)
+
+        # Feature importance
+        importance_df = plot_feature_importance(classifier, features,
+                                               f"{exp_folder}/feature_importance.png")
+        importance_df.to_csv(f"{exp_folder}/feature_importance.csv", index=False)
+        mlflow.log_artifact(f"{exp_folder}/feature_importance.png")
+        mlflow.log_artifact(f"{exp_folder}/feature_importance.csv")
+
+        return {
+            "train_metrics": train_metrics,
+            "valid_metrics": valid_metrics,
+            "y_valid_pred": y_valid_pred,
+            "y_valid_proba": y_valid_proba,
+            "X_valid_imputed_df": X_valid_imputed_df
+        }
+
+
 def lgb_early_stopping_callback(stopping_rounds):
     """Create LightGBM early stopping callback"""
     from lightgbm import early_stopping
@@ -569,6 +721,9 @@ class TrainingPipeline(ABC):
 
                 # Step 3: Generate additional artifacts
                 self._generate_additional_artifacts(results, data_splits, exp_folder)
+
+                # Step 3.5: Perform SHAP analysis
+                self._perform_shap_analysis(results, data_splits, exp_folder)
 
                 # Step 4: Save experiment summary
                 experiment_summary = self._save_experiment_summary(args, data_splits, results, timestamp, dvc_info, exp_folder)
@@ -692,6 +847,277 @@ class TrainingPipeline(ABC):
         for category, path in cm_splits.items():
             mlflow.log_artifact(path, artifact_path="confusion_matrix_analysis")
 
+    def _get_training_sample(self, X_train_data, sample_size=500):
+        """Sample from training data only for SHAP explainer background"""
+        if sample_size >= len(X_train_data):
+            return X_train_data
+        np.random.seed(42)
+        sample_indices = np.random.choice(len(X_train_data), size=sample_size, replace=False)
+        return X_train_data[sample_indices]
+
+    def _generate_waterfall_plots(self, explainer, X_valid_data, shap_values_valid, 
+                                  y_valid, y_valid_pred, feature_columns, exp_folder):
+        """Generate waterfall plots for samples from each confusion matrix class"""
+        print("Generating waterfall plots for confusion matrix classes...")
+        
+        # Identify classes
+        tp_mask = (y_valid == 1) & (y_valid_pred == 1)
+        tn_mask = (y_valid == 0) & (y_valid_pred == 0)
+        fp_mask = (y_valid == 0) & (y_valid_pred == 1)
+        fn_mask = (y_valid == 1) & (y_valid_pred == 0)
+        
+        classes = {
+            'TP': (tp_mask, 'True Positive'),
+            'TN': (tn_mask, 'True Negative'),
+            'FP': (fp_mask, 'False Positive'),
+            'FN': (fn_mask, 'False Negative')
+        }
+        
+        np.random.seed(42)
+        samples_per_class = 2  # Number of samples to plot per class
+        
+        waterfall_files = []
+        
+        for class_name, (mask, label) in classes.items():
+            indices = np.where(mask)[0]
+            if len(indices) == 0:
+                print(f"  No samples found for {label}, skipping...")
+                continue
+            
+            n_samples = min(samples_per_class, len(indices))
+            selected_indices = np.random.choice(indices, size=n_samples, replace=False)
+            
+            for i, idx in enumerate(selected_indices):
+                shap_values_instance = shap_values_valid[idx]
+                X_instance = X_valid_data[idx:idx+1]
+                
+                # Get expected value (base value)
+                if hasattr(explainer, 'expected_value'):
+                    base_value = explainer.expected_value
+                    if isinstance(base_value, np.ndarray):
+                        if len(base_value) > 1:
+                            base_value = base_value[1]  # For binary classification, use positive class
+                        else:
+                            base_value = base_value[0]
+                    # base_value is already a scalar
+                else:
+                    base_value = 0.0
+                
+                # Create Explanation object for waterfall plot
+                explanation = shap.Explanation(
+                    values=shap_values_instance.reshape(1, -1),
+                    base_values=np.array([base_value]),
+                    data=X_instance,
+                    feature_names=feature_columns
+                )
+                
+                plt.figure(figsize=(10, 8))
+                try:
+                    shap.plots.waterfall(explanation[0], show=False, max_display=20)
+                except Exception as e:
+                    # Fallback: use bar plot if waterfall fails
+                    print(f"    Warning: Waterfall plot failed for {label} sample {i+1}, using bar plot: {e}")
+                    shap.plots.bar(explanation[0], show=False, max_display=20)
+                plt.title(f"{label} - Sample {i+1} (True: {y_valid[idx]}, Pred: {y_valid_pred[idx]})")
+                plt.tight_layout()
+                filename = f"{exp_folder}/shap_waterfall_{class_name}_{i}.png"
+                plt.savefig(filename, dpi=150, bbox_inches='tight')
+                plt.close()
+                waterfall_files.append(filename)
+                print(f"  Saved {label} sample {i+1}: {filename}")
+        
+        return waterfall_files
+
+    def _perform_shap_analysis(self, results, data_splits, exp_folder):
+        """Perform comprehensive SHAP analysis on validation data"""
+        print("\n[Step 3.5] Performing SHAP analysis...")
+        
+        # Get pipeline and data
+        pipeline = results.get("pipeline")
+        if pipeline is None:
+            print("  WARNING: No pipeline found in results, skipping SHAP analysis")
+            return
+        
+        feature_columns = data_splits.get('feature_columns', [])
+        X_train, y_train = data_splits['train']
+        X_valid, y_valid = data_splits['valid']
+        y_valid_pred = results.get("y_valid_pred")
+        
+        if y_valid_pred is None:
+            print("  WARNING: No validation predictions found, skipping SHAP analysis")
+            return
+        
+        # Extract pipeline components
+        imputer = pipeline.named_steps['imputer']
+        has_scaler = 'scaler' in pipeline.named_steps
+        
+        # Transform data based on model type
+        X_train_imputed = imputer.transform(X_train)
+        X_valid_imputed = imputer.transform(X_valid)
+        
+        if has_scaler:
+            # LogisticRegression: need scaled data
+            scaler = pipeline.named_steps['scaler']
+            X_train_scaled = scaler.transform(X_train_imputed)
+            X_valid_scaled = scaler.transform(X_valid_imputed)
+            X_train_for_shap = X_train_scaled
+            X_valid_for_shap = X_valid_scaled
+        else:
+            # LightGBM: use imputed data directly
+            X_train_for_shap = X_train_imputed
+            X_valid_for_shap = X_valid_imputed
+        
+        # Sample from training data for background
+        background_sample = self._get_training_sample(X_train_for_shap, sample_size=500)
+        print(f"  Using {len(background_sample)} training samples for SHAP explainer background")
+        
+        # Create appropriate SHAP explainer
+        classifier = pipeline.named_steps['classifier']
+        
+        if isinstance(classifier, LGBMClassifier) or isinstance(classifier, XGBClassifier):
+            model_name = "LightGBM" if isinstance(classifier, LGBMClassifier) else "XGBoost"
+            print(f"  Using TreeExplainer for {model_name} model")
+            # For tree-based models (LightGBM/XGBoost) binary classification, TreeExplainer should auto-detect n_classes
+            # If it fails, try with explicit model_output parameter
+            try:
+                # First try: standard TreeExplainer (should work if model is properly fitted)
+                explainer = shap.TreeExplainer(classifier)
+            except Exception as e:
+                # Fallback: try with model_output='probability' for binary classification
+                print(f"    Warning: TreeExplainer failed: {e}")
+                print("    Trying TreeExplainer with model_output='probability'...")
+                try:
+                    explainer = shap.TreeExplainer(classifier, model_output='probability')
+                except Exception as e2:
+                    # Final fallback: try with model_output='raw' (log-odds)
+                    print(f"    Warning: TreeExplainer with probability output failed: {e2}")
+                    print("    Trying TreeExplainer with model_output='raw'...")
+                    explainer = shap.TreeExplainer(classifier, model_output='raw')
+        else:
+            # LogisticRegression: use LinearExplainer
+            print("  Using LinearExplainer for LogisticRegression model")
+            explainer = shap.LinearExplainer(classifier, background_sample)
+        
+        # Calculate SHAP values on validation data
+        print(f"  Calculating SHAP values on {len(X_valid_for_shap)} validation samples...")
+        shap_values_valid = explainer.shap_values(X_valid_for_shap)
+        
+        # Handle multi-class output (take positive class for binary classification)
+        if isinstance(shap_values_valid, list) and len(shap_values_valid) == 2:
+            shap_values_valid = shap_values_valid[1]
+        
+        # Generate SHAP plots
+        print("  Generating SHAP plots...")
+        
+        # Summary plot
+        plt.figure(figsize=(12, 10))
+        shap.summary_plot(shap_values_valid, X_valid_for_shap,
+                         feature_names=feature_columns,
+                         show=False, max_display=20)
+        plt.tight_layout()
+        summary_plot_path = f"{exp_folder}/shap_summary_plot.png"
+        plt.savefig(summary_plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"    Saved summary plot: {summary_plot_path}")
+        
+        # Feature importance (bar plot)
+        plt.figure(figsize=(10, 8))
+        shap.summary_plot(shap_values_valid, X_valid_for_shap,
+                         feature_names=feature_columns,
+                         plot_type="bar", show=False, max_display=20)
+        plt.tight_layout()
+        importance_plot_path = f"{exp_folder}/shap_feature_importance.png"
+        plt.savefig(importance_plot_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"    Saved feature importance plot: {importance_plot_path}")
+        
+        # Dependence plots for top 5 features
+        mean_abs_shap = np.abs(shap_values_valid).mean(axis=0)
+        top_indices = np.argsort(mean_abs_shap)[-5:][::-1]
+        
+        dependence_files = []
+        for feature_idx in top_indices:
+            feature_name = feature_columns[feature_idx]
+            plt.figure(figsize=(8, 6))
+            shap.dependence_plot(feature_idx, shap_values_valid, X_valid_for_shap,
+                               feature_names=feature_columns,
+                               show=False)
+            plt.tight_layout()
+            dependence_path = f"{exp_folder}/shap_dependence_{feature_name}.png"
+            plt.savefig(dependence_path, dpi=150, bbox_inches='tight')
+            plt.close()
+            dependence_files.append(dependence_path)
+            print(f"    Saved dependence plot for {feature_name}: {dependence_path}")
+        
+        # Generate waterfall plots for confusion matrix classes
+        waterfall_files = self._generate_waterfall_plots(
+            explainer, X_valid_for_shap, shap_values_valid,
+            y_valid, y_valid_pred, feature_columns, exp_folder
+        )
+        
+        # Calculate feature importance metrics
+        mean_abs_shap = np.abs(shap_values_valid).mean(axis=0)
+        std_abs_shap = np.abs(shap_values_valid).std(axis=0)
+        
+        importance_df = pd.DataFrame({
+            'feature': feature_columns,
+            'mean_abs_shap': mean_abs_shap,
+            'std_abs_shap': std_abs_shap,
+            'importance_rank': np.argsort(mean_abs_shap)[::-1] + 1
+        })
+        importance_df = importance_df.sort_values('mean_abs_shap', ascending=False).reset_index(drop=True)
+        
+        # Save feature importance CSV
+        importance_csv_path = f"{exp_folder}/shap_feature_importance.csv"
+        importance_df.to_csv(importance_csv_path, index=False)
+        print(f"    Saved feature importance CSV: {importance_csv_path}")
+        
+        # Save SHAP values as numpy array
+        shap_values_path = f"{exp_folder}/shap_values.npy"
+        np.save(shap_values_path, shap_values_valid)
+        print(f"    Saved SHAP values: {shap_values_path}")
+        
+        # Save validation sample data used
+        X_valid_df = pd.DataFrame(X_valid_for_shap, columns=feature_columns)
+        sample_data_path = f"{exp_folder}/shap_sample_data.csv"
+        X_valid_df.to_csv(sample_data_path, index=False)
+        print(f"    Saved sample data: {sample_data_path}")
+        
+        # Create summary JSON
+        summary = {
+            "num_features": len(feature_columns),
+            "num_validation_samples": len(X_valid_for_shap),
+            "background_sample_size": len(background_sample),
+            "top_feature": importance_df.iloc[0]['feature'] if len(importance_df) > 0 else None,
+            "explainer_type": "TreeExplainer" if (isinstance(classifier, LGBMClassifier) or isinstance(classifier, XGBClassifier)) else "LinearExplainer",
+            "analysis_timestamp": datetime.now().isoformat()
+        }
+        
+        summary_path = f"{exp_folder}/shap_analysis_summary.json"
+        with open(summary_path, "w") as f:
+            json.dump(summary, f, indent=2, default=str)
+        print(f"    Saved analysis summary: {summary_path}")
+        
+        # Log all artifacts to MLflow
+        print("  Logging SHAP artifacts to MLflow...")
+        artifacts_to_log = [
+            summary_plot_path,
+            importance_plot_path,
+            importance_csv_path,
+            shap_values_path,
+            sample_data_path,
+            summary_path
+        ]
+        artifacts_to_log.extend(dependence_files)
+        artifacts_to_log.extend(waterfall_files)
+        
+        for artifact_path in artifacts_to_log:
+            if os.path.exists(artifact_path):
+                mlflow.log_artifact(artifact_path, artifact_path="shap_analysis")
+                print(f"    Logged: {os.path.basename(artifact_path)}")
+        
+        print("  SHAP analysis completed!")
+
     def _save_experiment_summary(self, args, data_splits, results, timestamp, dvc_info, exp_folder):
         """Common experiment summary saving"""
         print("\n[Step 5] Saving experiment summary...")
@@ -812,6 +1238,40 @@ class LightGBMPipeline(TrainingPipeline):
         return results
 
 
+class XGBoostPipeline(TrainingPipeline):
+    """Concrete implementation for XGBoost training"""
+
+    def _build_pipeline(self, args):
+        """Build XGBoost pipeline"""
+        print(f"\n[Step 3] Building XGBoost pipeline...")
+        if not hasattr(args, 'hyperparams') or not args.hyperparams:
+            raise ValueError("Hyperparams are required for XGBoost")
+
+        mlflow.log_param("hyperparams", args.hyperparams)
+        pipeline = self.strategy.build_pipeline(args.hyperparams)
+        return pipeline
+
+    def _train_model(self, pipeline, data_splits, exp_folder, args):
+        """Train XGBoost model"""
+        X_train, y_train = data_splits['train']
+        X_valid, y_valid = data_splits['valid']
+
+        # Use dynamic feature columns
+        feature_columns = data_splits.get('feature_columns', FEATURE_COLUMNS)
+
+        results = self.strategy.train(
+            pipeline, X_train, y_train, X_valid, y_valid,
+            exp_folder, feature_columns, args.hyperparams, data_splits
+        )
+
+        # Log the pipeline
+        mlflow.sklearn.log_model(sk_model=pipeline, name="model_pipeline")
+
+        # Include pipeline in results for imputation statistics
+        results["pipeline"] = pipeline
+
+        return results
+
 
 class TrainerFactory:
     """Factory for creating training pipelines"""
@@ -822,14 +1282,15 @@ class TrainerFactory:
         Create the appropriate training pipeline based on model type
 
         Args:
-            model_type: Either 'logreg' or 'lgbm'
+            model_type: Either 'logreg', 'lgbm', or 'xgb'
 
         Returns:
             TrainingPipeline: The appropriate pipeline instance
         """
         strategies = {
             'logreg': LogisticRegressionStrategy(),
-            'lgbm': LightGBMStrategy()
+            'lgbm': LightGBMStrategy(),
+            'xgb': XGBoostStrategy()
         }
 
         if model_type not in strategies:
@@ -837,7 +1298,8 @@ class TrainerFactory:
 
         pipelines = {
             'logreg': LogisticRegressionPipeline,
-            'lgbm': LightGBMPipeline
+            'lgbm': LightGBMPipeline,
+            'xgb': XGBoostPipeline
         }
 
         strategy = strategies[model_type]
@@ -886,9 +1348,9 @@ def parse_args():
     parser.add_argument(
         "--model",
         type=str,
-        choices=["logreg", "lgbm"],
+        choices=["logreg", "lgbm", "xgb"],
         default=None,
-        help="Model type to train: 'logreg' (Logistic Regression) or 'lgbm' (LightGBM)"
+        help="Model type to train: 'logreg' (Logistic Regression), 'lgbm' (LightGBM), or 'xgb' (XGBoost)"
     )
     
     parser.add_argument(
