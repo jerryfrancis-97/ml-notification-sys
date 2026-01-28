@@ -39,6 +39,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import precision_recall_curve
 from lightgbm import LGBMClassifier
 from xgboost import XGBClassifier
+from xgboost.callback import EarlyStopping
 
 # Import project modules
 from data_utils import time_based_split, evaluate_model, get_dvc_hash
@@ -373,7 +374,8 @@ class LightGBMStrategy(TrainingStrategy):
         # Store evaluation results
         evals_result = {}
 
-        classifier.fit(
+        #overloading classifier variable to avoid confusion
+        classifier = classifier.fit(
             X_train_imputed, y_train,
             eval_set=[(X_train_imputed, y_train), (X_valid_imputed, y_valid)],
             eval_names=['training', 'valid_1'],
@@ -384,14 +386,14 @@ class LightGBMStrategy(TrainingStrategy):
             ]
         )
 
-        # Update the pipeline's classifier with the trained one
-        pipeline.named_steps['classifier'] = classifier
+        # Store classifier as instance variable
+        self.classifier = classifier
 
         # Predictions
-        y_train_pred = classifier.predict(X_train_imputed)
-        y_train_proba = classifier.predict_proba(X_train_imputed)[:, 1]
-        y_valid_pred = classifier.predict(X_valid_imputed)
-        y_valid_proba = classifier.predict_proba(X_valid_imputed)[:, 1]
+        y_train_pred = self.classifier.predict(X_train_imputed)
+        y_train_proba = self.classifier.predict_proba(X_train_imputed)[:, 1]
+        y_valid_pred = self.classifier.predict(X_valid_imputed)
+        y_valid_proba = self.classifier.predict_proba(X_valid_imputed)[:, 1]
 
         # Evaluate
         train_metrics = evaluate_model(y_train, y_train_pred, "Training")
@@ -405,8 +407,8 @@ class LightGBMStrategy(TrainingStrategy):
             mlflow.log_metric(f"{prefix}_f1", metrics["f1"])
 
         # Log LightGBM specific info
-        mlflow.log_metric("best_iteration", classifier.best_iteration_)
-        mlflow.log_metric("n_estimators_used", classifier.n_estimators_)
+        mlflow.log_metric("best_iteration", self.classifier.best_iteration_)
+        mlflow.log_metric("n_estimators_used", self.classifier.n_estimators_)
 
         # Generate visualizations
         print("\nGenerating visualizations...")
@@ -469,7 +471,7 @@ class LightGBMStrategy(TrainingStrategy):
         mlflow.log_metric("valid_roc_auc", valid_roc_auc)
 
         # Feature importance
-        importance_df = plot_feature_importance(classifier, features,
+        importance_df = plot_feature_importance(self.classifier, features,
                                                f"{exp_folder}/feature_importance.png")
         importance_df.to_csv(f"{exp_folder}/feature_importance.csv", index=False)
         mlflow.log_artifact(f"{exp_folder}/feature_importance.png")
@@ -501,8 +503,9 @@ class XGBoostStrategy(TrainingStrategy):
         print("Training XGBoost Pipeline")
         print("="*50)
 
-        # For XGBoost with early stopping, we need to handle it differently
-        # First fit the imputer on training data
+        # We cannot use pipeline.fit(X_train, y_train) like logreg because XGBClassifier.fit()
+        # requires eval_set and early_stopping_rounds. sklearn Pipeline.fit(X, y) only
+        # forwards X and y to each step and has no API to pass those to the final estimator.
         imputer = pipeline.named_steps['imputer']
         imputer.fit(X_train)
 
@@ -520,30 +523,49 @@ class XGBoostStrategy(TrainingStrategy):
         # Get hyperparams and handle early stopping
         xgb_params = hyperparams.copy()
         early_stopping_rounds = xgb_params.pop("early_stopping_rounds", 50)
+        xgb_params.setdefault("callbacks", [])
+        xgb_params["callbacks"] = [EarlyStopping(rounds=early_stopping_rounds)] + list(xgb_params["callbacks"])
 
         # Create and train XGBoost model with early stopping
         classifier = XGBClassifier(**xgb_params)
 
         # Fit with early stopping (sklearn-compatible interface)
-        #overlaoding classifier var
+        #overloading classifier variable to avoid confusion
         classifier = classifier.fit(
             X_train_imputed, y_train,
-            eval_set=[(X_valid_imputed, y_valid)],
-            early_stopping_rounds=early_stopping_rounds,
-            verbose=False
+            eval_set=[(X_train_imputed, y_train), (X_valid_imputed, y_valid)],
+            # eval_names=["training", "valid_1"],
         )
 
-        # Get evaluation results from classifier
-        evals_result = classifier.evals_result_ if hasattr(classifier, 'evals_result_') else {}
+        # Store classifier as instance variable
+        self.classifier = classifier
 
-        # Update the pipeline's classifier with the trained one
-        pipeline.named_steps['classifier'] = classifier
+        # Get evaluation results from classifier
+        evals_result = self.classifier.evals_result_ if hasattr(self.classifier, 'evals_result_') else {}
+
+        # Transform XGBoost evals_result format to match LightGBM format for plotting
+        # XGBoost uses "logloss" and "error", LightGBM uses "binary_logloss" and "binary_error"
+        plot_eval_results = {
+            "training": {"binary_logloss": None, "binary_error": None},
+            "valid_1": {"binary_logloss": None, "binary_error": None}
+        }
+        for key in evals_result.keys():
+            if key == "validation_0":
+                plot_eval_results["training"]["binary_logloss"] = evals_result[key]['logloss']
+                plot_eval_results["training"]["binary_error"] = evals_result[key]['error']
+            elif key == "validation_1":
+                plot_eval_results["valid_1"]["binary_logloss"] = evals_result[key]['logloss']
+                plot_eval_results["valid_1"]["binary_error"] = evals_result[key]['error']
+            else:
+                raise ValueError(f"Invalid key: {key}")
+        print("plot_eval_results", plot_eval_results)
+
 
         # Predictions
-        y_train_pred = classifier.predict(X_train_imputed)
-        y_train_proba = classifier.predict_proba(X_train_imputed)[:, 1]
-        y_valid_pred = classifier.predict(X_valid_imputed)
-        y_valid_proba = classifier.predict_proba(X_valid_imputed)[:, 1]
+        y_train_pred = self.classifier.predict(X_train_imputed)
+        y_train_proba = self.classifier.predict_proba(X_train_imputed)[:, 1]
+        y_valid_pred = self.classifier.predict(X_valid_imputed)
+        y_valid_proba = self.classifier.predict_proba(X_valid_imputed)[:, 1]
 
         # Evaluate
         train_metrics = evaluate_model(y_train, y_train_pred, "Training")
@@ -557,9 +579,9 @@ class XGBoostStrategy(TrainingStrategy):
             mlflow.log_metric(f"{prefix}_f1", metrics["f1"])
 
         # Log XGBoost specific info
-        if hasattr(classifier, 'best_iteration'):
-            mlflow.log_metric("best_iteration", classifier.best_iteration)
-        mlflow.log_metric("n_estimators_used", classifier.n_estimators)
+        if hasattr(self.classifier, 'best_iteration'):
+            mlflow.log_metric("best_iteration", self.classifier.best_iteration)
+        mlflow.log_metric("n_estimators_used", self.classifier.n_estimators)
 
         # Generate visualizations
         print("\nGenerating visualizations...")
@@ -574,17 +596,17 @@ class XGBoostStrategy(TrainingStrategy):
 
         # Training history (if available)
         if evals_result:
-            plot_training_history(evals_result, f"{exp_folder}/training_history.png")
+            plot_training_history(plot_eval_results, f"{exp_folder}/training_history.png")
             mlflow.log_artifact(f"{exp_folder}/training_history.png")
 
             # Accuracy curves
-            plot_accuracy_curves(evals_result, f"{exp_folder}/accuracy_curves.png")
+            plot_accuracy_curves(plot_eval_results, f"{exp_folder}/accuracy_curves.png")
             mlflow.log_artifact(f"{exp_folder}/accuracy_curves.png")
 
         # Compute per-round metrics for F1, precision, recall curves
         print("Computing per-round metrics...")
         metrics_per_round = compute_metrics_per_round(
-            classifier, X_train_imputed, y_train, X_valid_imputed, y_valid
+            self.classifier, X_train_imputed, y_train, X_valid_imputed, y_valid
         )
 
         plot_f1_curves(metrics_per_round, f"{exp_folder}/f1_curves.png")
@@ -615,7 +637,7 @@ class XGBoostStrategy(TrainingStrategy):
         mlflow.log_metric("valid_roc_auc", valid_roc_auc)
 
         # Feature importance
-        importance_df = plot_feature_importance(classifier, features,
+        importance_df = plot_feature_importance(self.classifier, features,
                                                f"{exp_folder}/feature_importance.png")
         importance_df.to_csv(f"{exp_folder}/feature_importance.csv", index=False)
         mlflow.log_artifact(f"{exp_folder}/feature_importance.png")
@@ -668,7 +690,7 @@ class TrainingPipeline(ABC):
             # Configure logging to write to file (not console)
             log_file = os.path.join(exp_folder, "training_log.txt")
             logging.basicConfig(
-                level=logging.DEBUG,
+                level=logging.INFO,
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                 handlers=[
                     logging.FileHandler(log_file, mode='w', encoding='utf-8'),
@@ -807,11 +829,11 @@ class TrainingPipeline(ABC):
         # Log target distribution
         train_pos_rate = y_train.mean()
         valid_pos_rate = y_valid.mean() 
-        mlflow.log_param("train_positive_rate", f"{train_pos_rate:.4f}")
-        mlflow.log_param("valid_positive_rate", f"{valid_pos_rate:.4f}")
-        print(f"\n  Target distribution:")
-        print(f"    Train positive rate: {train_pos_rate:.4f}")
-        print(f"    Valid positive rate: {valid_pos_rate:.4f}")
+        mlflow.log_param("train_ratio_of_positive_class", f"{train_pos_rate:.4f}")
+        mlflow.log_param("valid_ratio_of_positive_class", f"{valid_pos_rate:.4f}")
+        print(f"\n  Ratio of positive class in target:")
+        print(f"    Train ratio of positive class: {train_pos_rate:.4f}")
+        print(f"    Valid ratio of positive class: {valid_pos_rate:.4f}")
 
         return {
             'train': (X_train, y_train),
@@ -969,30 +991,24 @@ class TrainingPipeline(ABC):
         
         # Sample from training data for background
         background_sample = self._get_training_sample(X_train_for_shap, sample_size=500)
-        print(f"  Using {len(background_sample)} training samples for SHAP explainer background")
+        print(f"  Using {background_sample.shape} training samples for SHAP explainer background")
         
         # Create appropriate SHAP explainer
-        classifier = pipeline.named_steps['classifier']
+        # Get classifier from the strategy instance (LightGBM/XGBoost) or pipeline (LogisticRegression)
+        if hasattr(self.strategy, 'classifier'):
+            classifier = self.strategy.classifier
+            print("self.classifier found")
+        else:
+            classifier = pipeline.named_steps['classifier']
+            print("pipeline.named_steps['classifier'] found")
         
         if isinstance(classifier, LGBMClassifier) or isinstance(classifier, XGBClassifier):
-            model_name = "LightGBM" if isinstance(classifier, LGBMClassifier) else "XGBoost"
-            print(f"  Using TreeExplainer for {model_name} model")
-            # For tree-based models (LightGBM/XGBoost) binary classification, TreeExplainer should auto-detect n_classes
-            # If it fails, try with explicit model_output parameter
             try:
-                # First try: standard TreeExplainer (should work if model is properly fitted)
-                explainer = shap.TreeExplainer(classifier)
+                explainer = shap.TreeExplainer(classifier, data=background_sample) 
+                print("using classifier refit for TreeExplainer")
             except Exception as e:
-                # Fallback: try with model_output='probability' for binary classification
                 print(f"    Warning: TreeExplainer failed: {e}")
-                print("    Trying TreeExplainer with model_output='probability'...")
-                try:
-                    explainer = shap.TreeExplainer(classifier, model_output='probability')
-                except Exception as e2:
-                    # Final fallback: try with model_output='raw' (log-odds)
-                    print(f"    Warning: TreeExplainer with probability output failed: {e2}")
-                    print("    Trying TreeExplainer with model_output='raw'...")
-                    explainer = shap.TreeExplainer(classifier, model_output='raw')
+                explainer = shap.TreeExplainer(classifier, data=background_sample)
         else:
             # LogisticRegression: use LinearExplainer
             print("  Using LinearExplainer for LogisticRegression model")
@@ -1348,7 +1364,7 @@ def parse_args():
     parser.add_argument(
         "--model",
         type=str,
-        choices=["logreg", "lgbm", "xgb"],
+        choices=["logreg", "lgbm", "xgboost"],
         default=None,
         help="Model type to train: 'logreg' (Logistic Regression), 'lgbm' (LightGBM), or 'xgb' (XGBoost)"
     )
