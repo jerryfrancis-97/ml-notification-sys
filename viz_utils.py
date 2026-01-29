@@ -174,10 +174,10 @@ def plot_coefficients(model, feature_names, save_path):
     return coef_df
 
 
-# ============ LightGBM-Specific Plotting Functions ============
+# ============ Boosting Model Plotting Functions ============
 
-def plot_feature_importance(model, feature_names, save_path):
-    """Plot LightGBM feature importance as horizontal bar chart"""
+def plot_feature_importance(model, feature_names, save_path, model_name: str = "LightGBM"):
+    """Plot boosting model feature importance as horizontal bar chart"""
     importance = model.feature_importances_
     
     # Create DataFrame and sort
@@ -190,7 +190,7 @@ def plot_feature_importance(model, feature_names, save_path):
     plt.barh(importance_df["feature"], importance_df["importance"], color='steelblue')
     plt.xlabel('Feature Importance')
     plt.ylabel('Feature')
-    plt.title('LightGBM Feature Importance')
+    plt.title(f'{model_name} Feature Importance')
     plt.tight_layout()
     plt.savefig(save_path)
     plt.close()
@@ -199,8 +199,8 @@ def plot_feature_importance(model, feature_names, save_path):
     return importance_df
 
 
-def plot_training_history(evals_result, save_path):
-    """Plot training and validation loss curves over boosting rounds"""
+def plot_training_history(evals_result, save_path, model_name: str = "LightGBM"):
+    """Plot training and validation loss curves over boosting rounds for a boosting model"""
     train_loss = evals_result['training']['binary_logloss']
     valid_loss = evals_result['valid_1']['binary_logloss']
     
@@ -209,7 +209,7 @@ def plot_training_history(evals_result, save_path):
     plt.plot(valid_loss, label='Validation Loss', color='orange')
     plt.xlabel('Boosting Round')
     plt.ylabel('Binary Log Loss')
-    plt.title('LightGBM Training History - Loss')
+    plt.title(f'{model_name} Training History - Loss')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -219,8 +219,8 @@ def plot_training_history(evals_result, save_path):
     print(f"Training history saved to {save_path}")
 
 
-def plot_accuracy_curves(evals_result, save_path):
-    """Plot training and validation accuracy curves over boosting rounds"""
+def plot_accuracy_curves(evals_result, save_path, model_name: str = "LightGBM"):
+    """Plot training and validation accuracy curves over boosting rounds for a boosting model"""
     # binary_error is 1 - accuracy, so accuracy = 1 - binary_error
     train_error = evals_result['training']['binary_error']
     valid_error = evals_result['valid_1']['binary_error']
@@ -233,7 +233,7 @@ def plot_accuracy_curves(evals_result, save_path):
     plt.plot(valid_acc, label='Validation Accuracy', color='orange')
     plt.xlabel('Boosting Round')
     plt.ylabel('Accuracy')
-    plt.title('LightGBM Training History - Accuracy')
+    plt.title(f'{model_name} Training History - Accuracy')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -293,14 +293,14 @@ def compute_metrics_per_round(model, X_train, y_train, X_valid, y_valid):
     return metrics
 
 
-def plot_f1_curves(metrics, save_path):
-    """Plot training and validation F1 score curves over boosting rounds"""
+def plot_f1_curves(metrics, save_path, model_name: str = "LightGBM"):
+    """Plot training and validation F1 score curves over boosting rounds for a boosting model"""
     plt.figure(figsize=(10, 6))
     plt.plot(metrics['train_f1'], label='Training F1', color='blue')
     plt.plot(metrics['valid_f1'], label='Validation F1', color='orange')
     plt.xlabel('Boosting Round')
     plt.ylabel('F1 Score')
-    plt.title('LightGBM Training History - F1 Score')
+    plt.title(f'{model_name} Training History - F1 Score')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -310,14 +310,14 @@ def plot_f1_curves(metrics, save_path):
     print(f"F1 curves saved to {save_path}")
 
 
-def plot_precision_curves(metrics, save_path):
-    """Plot training and validation precision curves over boosting rounds"""
+def plot_precision_curves(metrics, save_path, model_name: str = "LightGBM"):
+    """Plot training and validation precision curves over boosting rounds for a boosting model"""
     plt.figure(figsize=(10, 6))
     plt.plot(metrics['train_precision'], label='Training Precision', color='blue')
     plt.plot(metrics['valid_precision'], label='Validation Precision', color='orange')
     plt.xlabel('Boosting Round')
     plt.ylabel('Precision')
-    plt.title('LightGBM Training History - Precision')
+    plt.title(f'{model_name} Training History - Precision')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -327,14 +327,14 @@ def plot_precision_curves(metrics, save_path):
     print(f"Precision curves saved to {save_path}")
 
 
-def plot_recall_curves(metrics, save_path):
-    """Plot training and validation recall curves over boosting rounds"""
+def plot_recall_curves(metrics, save_path, model_name: str = "LightGBM"):
+    """Plot training and validation recall curves over boosting rounds for a boosting model"""
     plt.figure(figsize=(10, 6))
     plt.plot(metrics['train_recall'], label='Training Recall', color='blue')
     plt.plot(metrics['valid_recall'], label='Validation Recall', color='orange')
     plt.xlabel('Boosting Round')
     plt.ylabel('Recall')
-    plt.title('LightGBM Training History - Recall')
+    plt.title(f'{model_name} Training History - Recall')
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
