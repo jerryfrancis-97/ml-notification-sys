@@ -422,11 +422,11 @@ class LightGBMStrategy(TrainingStrategy):
         mlflow.log_artifact(f"{exp_folder}/confusion_matrix_valid.png")
 
         # Training history
-        plot_training_history(evals_result, f"{exp_folder}/training_history.png")
+        plot_training_history(evals_result, f"{exp_folder}/training_history.png", model_name="LightGBM")
         mlflow.log_artifact(f"{exp_folder}/training_history.png")
 
         # Accuracy curves
-        plot_accuracy_curves(evals_result, f"{exp_folder}/accuracy_curves.png")
+        plot_accuracy_curves(evals_result, f"{exp_folder}/accuracy_curves.png", model_name="LightGBM")
         mlflow.log_artifact(f"{exp_folder}/accuracy_curves.png")
 
         # Compute per-round metrics for F1, precision, recall curves
@@ -435,9 +435,9 @@ class LightGBMStrategy(TrainingStrategy):
             classifier, X_train_imputed, y_train, X_valid_imputed, y_valid
         )
 
-        plot_f1_curves(metrics_per_round, f"{exp_folder}/f1_curves.png")
-        plot_precision_curves(metrics_per_round, f"{exp_folder}/precision_curves.png")
-        plot_recall_curves(metrics_per_round, f"{exp_folder}/recall_curves.png")
+        plot_f1_curves(metrics_per_round, f"{exp_folder}/f1_curves.png", model_name="LightGBM")
+        plot_precision_curves(metrics_per_round, f"{exp_folder}/precision_curves.png", model_name="LightGBM")
+        plot_recall_curves(metrics_per_round, f"{exp_folder}/recall_curves.png", model_name="LightGBM")
         mlflow.log_artifact(f"{exp_folder}/f1_curves.png")
         mlflow.log_artifact(f"{exp_folder}/precision_curves.png")
         mlflow.log_artifact(f"{exp_folder}/recall_curves.png")
@@ -472,7 +472,8 @@ class LightGBMStrategy(TrainingStrategy):
 
         # Feature importance
         importance_df = plot_feature_importance(self.classifier, features,
-                                               f"{exp_folder}/feature_importance.png")
+                                               f"{exp_folder}/feature_importance.png",
+                                               model_name="LightGBM")
         importance_df.to_csv(f"{exp_folder}/feature_importance.csv", index=False)
         mlflow.log_artifact(f"{exp_folder}/feature_importance.png")
         mlflow.log_artifact(f"{exp_folder}/feature_importance.csv")
@@ -596,11 +597,11 @@ class XGBoostStrategy(TrainingStrategy):
 
         # Training history (if available)
         if evals_result:
-            plot_training_history(plot_eval_results, f"{exp_folder}/training_history.png")
+            plot_training_history(plot_eval_results, f"{exp_folder}/training_history.png", model_name="XGBoost")
             mlflow.log_artifact(f"{exp_folder}/training_history.png")
 
             # Accuracy curves
-            plot_accuracy_curves(plot_eval_results, f"{exp_folder}/accuracy_curves.png")
+            plot_accuracy_curves(plot_eval_results, f"{exp_folder}/accuracy_curves.png", model_name="XGBoost")
             mlflow.log_artifact(f"{exp_folder}/accuracy_curves.png")
 
         # Compute per-round metrics for F1, precision, recall curves
@@ -609,9 +610,9 @@ class XGBoostStrategy(TrainingStrategy):
             self.classifier, X_train_imputed, y_train, X_valid_imputed, y_valid
         )
 
-        plot_f1_curves(metrics_per_round, f"{exp_folder}/f1_curves.png")
-        plot_precision_curves(metrics_per_round, f"{exp_folder}/precision_curves.png")
-        plot_recall_curves(metrics_per_round, f"{exp_folder}/recall_curves.png")
+        plot_f1_curves(metrics_per_round, f"{exp_folder}/f1_curves.png", model_name="XGBoost")
+        plot_precision_curves(metrics_per_round, f"{exp_folder}/precision_curves.png", model_name="XGBoost")
+        plot_recall_curves(metrics_per_round, f"{exp_folder}/recall_curves.png", model_name="XGBoost")
         mlflow.log_artifact(f"{exp_folder}/f1_curves.png")
         mlflow.log_artifact(f"{exp_folder}/precision_curves.png")
         mlflow.log_artifact(f"{exp_folder}/recall_curves.png")
@@ -638,7 +639,8 @@ class XGBoostStrategy(TrainingStrategy):
 
         # Feature importance
         importance_df = plot_feature_importance(self.classifier, features,
-                                               f"{exp_folder}/feature_importance.png")
+                                               f"{exp_folder}/feature_importance.png",
+                                               model_name="XGBoost")
         importance_df.to_csv(f"{exp_folder}/feature_importance.csv", index=False)
         mlflow.log_artifact(f"{exp_folder}/feature_importance.png")
         mlflow.log_artifact(f"{exp_folder}/feature_importance.csv")
