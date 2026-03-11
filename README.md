@@ -19,7 +19,45 @@ Used
 - MLFlow Model Registry, Tracking and Serving for experiment steup (Local Self hosting setup)
 - Great expectations for data quality checks
 
+## System Architecture
 
+```mermaid
+flowchart TB
+    subgraph D["Data pipeline"]
+        S["data_pipeline/simulator.py"] --> G["data_pipeline/generate_logs.py"] --> X["data_pipeline/data_clean_great_exp.py"]
+        X --> F["data_pipeline/feature_engg.py"] --> I["data_pipeline/impute_features.py"]
+    end
+
+    subgraph C["Config"]
+        Y["configs/*.yaml"] --> U["config/config_utils.py"]
+    end
+
+    subgraph E["Train"]
+        R["training/trainer.py"] --> A["training/factory.py"] --> L["training/pipelines.py"] --> T["training/strategies.py"]
+    end
+
+    subgraph H["HPO"]
+        O1["hpo/tune_logreg.py"]
+        O2["hpo/tune_lgbm.py"]
+    end
+
+    subgraph M["Registry"]
+        ML["MLflow"]
+    end
+
+    subgraph V["Inference"]
+        E2["inference/decision_engine.py"]
+    end
+
+    I --> R
+    I --> O1
+    I --> O2
+    U --> R
+    T --> ML
+    O1 --> ML
+    O2 --> ML
+    ML --> E2
+```
 
 ## Setup
 
@@ -40,23 +78,24 @@ mlflow server --host 0.0.0.0 --port 5000
 
 ```bash
 # 1. Generate synthetic data
-python simulator.py
-python generate_logs.py
+python -m data_pipeline.simulator
+python -m data_pipeline.generate_logs
 
 # 2. Feature engineering + imputation
-python feature_engg.py
-python impute_features.py
+python -m data_pipeline.feature_engg
+python -m data_pipeline.impute_features
 
 # 3. Train model (logs to MLflow)
-python models.py          # Logistic Regression
-python models_lgbm.py     # LightGBM
+python -m training.trainer --config configs/logreg.yaml   # Logistic Regression
+python -m training.trainer --config configs/lgbm.yaml      # LightGBM
+python -m training.trainer --config configs/xgb.yaml       # XGBoost
 
 # 4. Hyperparameter tuning with Optuna
-python tune_logreg.py    # Logistic Regression HPO
-python tune_lgbm.py      # LightGBM HPO
+python -m hpo.tune_logreg    # Logistic Regression HPO
+python -m hpo.tune_lgbm      # LightGBM HPO
 
 # 5. Run decision engine
-python decision_engine.py
+python -m inference.decision_engine
 ```
 
 

@@ -22,10 +22,10 @@ from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 from xgboost.callback import EarlyStopping
 
-from callbacks import lgb_early_stopping_callback, lgb_record_evaluation_callback
-from data_utils import evaluate_model
-from transformers import FeatureImputerTransformer
-from viz_utils import (
+from training.callbacks import lgb_early_stopping_callback, lgb_record_evaluation_callback
+from training.data_utils import evaluate_model
+from training.transformers import FeatureImputerTransformer
+from viz.viz_utils import (
     compute_metrics_per_round,
     plot_accuracy_curves,
     plot_coefficients,

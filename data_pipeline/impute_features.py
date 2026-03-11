@@ -65,7 +65,7 @@ def impute_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 if __name__ == "__main__":
-    from feature_engg import apply_feature_engineering
+    from data_pipeline.feature_engg import apply_feature_engineering
     
     # Load data with engineered features
     df = apply_feature_engineering()

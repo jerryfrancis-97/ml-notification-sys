@@ -2,48 +2,45 @@ import pandas as pd
 import os
 import json
 from datetime import datetime
-import lightgbm as lgb
-from lightgbm import LGBMClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
 import mlflow
 from dotenv import load_dotenv
 
 # Import from utility modules
-from data_utils import DataLoader, evaluate_model, get_dvc_hash
-from viz_utils import (
-    plot_confusion_matrix, plot_pr_curve, plot_roc_curve,
-    plot_feature_importance, plot_training_history, plot_accuracy_curves,
-    compute_metrics_per_round, plot_f1_curves, plot_precision_curves, plot_recall_curves,
-    plot_loss_learning_curve_lgbm
+from training.data_utils import DataLoader, evaluate_model, load_data, get_feature_columns, time_based_split, get_dvc_hash
+from viz.viz_utils import (
+    plot_confusion_matrix, plot_learning_curve, plot_loss_learning_curve,
+    plot_pr_curve, plot_roc_curve
 )
-from analysis_utils import export_confusion_matrix_splits
+from viz.analysis_utils import export_confusion_matrix_splits
 
 load_dotenv(".env")
 
 
 # ============ Experiment Setup ============
 
-def run_lgbm_experiment(data_path, hyperparams, experiment_name):
+def run_experiment(data_path, model_class, hyperparams, experiment_name):
     """
-    Run a complete LightGBM experiment with given data and hyperparameters.
-    Saves all results to an experiment-specific folder and logs to MLflow.
+    Run a complete experiment with given data, model, and hyperparameters.
+    Saves all results to an experiment-specific folder.
     
     Args:
         data_path: Path to the feature data CSV
-        hyperparams: dict of hyperparameters for LightGBM
+        model_class: sklearn model class (e.g., LogisticRegression)
+        hyperparams: dict of hyperparameters for the model
         experiment_name: Name for the experiment
     
     Returns:
         dict with train/valid metrics and experiment path
     """
+    # Create experiment folder with timestamp
     mlflow.set_experiment(experiment_name)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     run_name = f"run_{timestamp}"
-    
     with mlflow.start_run(run_name=run_name):
-        # Log parameters
         mlflow.log_param("hyperparams", hyperparams)
         mlflow.log_param("data_path", data_path)
-        mlflow.log_param("model_type", "LightGBM")
         
         # Log DVC data hash for data lineage tracking
         dvc_info = get_dvc_hash(data_path)
@@ -52,12 +49,11 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
             mlflow.log_param("data_dvc_size", dvc_info['size'])
             print(f"DVC Data Hash: {dvc_info['md5']}")
         
-        # Create experiment folder
         exp_folder = f"experiments/{experiment_name}/{timestamp}"
         os.makedirs(exp_folder, exist_ok=True)
         
         print(f"\n{'='*50}")
-        print(f"Running LightGBM Experiment: {experiment_name}")
+        print(f"Running Experiment: {experiment_name}")
         print(f"Experiment folder: {exp_folder}")
         print(f"{'='*50}")
         
@@ -84,122 +80,62 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
         mlflow.log_param("dataset_shape", data_loader.df.shape)
         mlflow.log_param("target_distribution", data_loader.get_target_distribution())
         
-        # Prepare X, y (no scaling needed for tree-based models)
+        # Prepare X, y
         X_train, y_train = data_loader.get_X_y("train")
         X_valid, y_valid = data_loader.get_X_y("valid")
         X_test, y_test = data_loader.get_X_y("test")
-        
-        # Convert to numpy arrays for LightGBM
-        X_train, y_train = X_train.values, y_train.values
-        X_valid, y_valid = X_valid.values, y_valid.values
-        X_test, y_test = X_test.values, y_test.values
-        
         mlflow.log_param("features", features)
         
-        # Extract early stopping rounds from hyperparams
-        hyperparams_copy = hyperparams.copy()
-        early_stopping_rounds = hyperparams_copy.pop("early_stopping_rounds", None)
+        # Scale features
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_valid_scaled = scaler.transform(X_valid)
+        X_test_scaled = scaler.transform(X_test)
         
-        # Train LightGBM model
-        print("\nTraining LightGBM model...")
-        model = LGBMClassifier(**hyperparams_copy)
+        # Train model
+        model = model_class(**hyperparams)
+        model.fit(X_train_scaled, y_train)
+        mlflow.sklearn.log_model(sk_model=model, name=run_name)
         
-        # Fit with early stopping using validation set
-        evals_result = {}
-        model.fit(
-            X_train, y_train,
-            eval_set=[(X_train, y_train), (X_valid, y_valid)],
-            eval_names=['training', 'valid_1'],
-            eval_metric=['logloss', 'binary_error'],
-            callbacks=[
-                lgb.early_stopping(stopping_rounds=early_stopping_rounds or 20),
-                lgb.record_evaluation(evals_result)
-            ]
-        )
+        # Plot learning curve (uses cross-validation on training data)
+        print("\nGenerating learning curve...")
+        plot_learning_curve(model, X_train_scaled, y_train, 
+                           f"{exp_folder}/learning_curve.png", cv=5)
+        mlflow.log_artifact(f"{exp_folder}/learning_curve.png")
         
-        # Log model to MLflow with registration
-        mlflow.lightgbm.log_model(
-            lgb_model=model,
-            artifact_path="model",
-            registered_model_name="lgbm_model"
-        )
-        
-        # Plot training history (loss)
-        print("\nGenerating training history plots...")
-        plot_training_history(evals_result, f"{exp_folder}/training_history.png")
-        mlflow.log_artifact(f"{exp_folder}/training_history.png")
-        
-        # Plot accuracy curves
-        plot_accuracy_curves(evals_result, f"{exp_folder}/accuracy_curves.png")
-        mlflow.log_artifact(f"{exp_folder}/accuracy_curves.png")
-        
-        # Plot loss learning curve (loss vs training set size)
+        # Plot loss learning curve
         print("Generating loss learning curve...")
-        plot_loss_learning_curve_lgbm(
-            X_train, y_train, X_valid, y_valid, hyperparams,
-            f"{exp_folder}/learning_curve_loss.png"
-        )
+        plot_loss_learning_curve(model, X_train_scaled, y_train,
+                                f"{exp_folder}/learning_curve_loss.png", cv=5)
         mlflow.log_artifact(f"{exp_folder}/learning_curve_loss.png")
         
-        # Compute F1, precision, recall per round
-        print("Computing F1, precision, recall per round...")
-        round_metrics = compute_metrics_per_round(model, X_train, y_train, X_valid, y_valid)
-        
-        # Plot F1 curves
-        plot_f1_curves(round_metrics, f"{exp_folder}/f1_curves.png")
-        mlflow.log_artifact(f"{exp_folder}/f1_curves.png")
-        
-        # Plot precision curves
-        plot_precision_curves(round_metrics, f"{exp_folder}/precision_curves.png")
-        mlflow.log_artifact(f"{exp_folder}/precision_curves.png")
-        
-        # Plot recall curves
-        plot_recall_curves(round_metrics, f"{exp_folder}/recall_curves.png")
-        mlflow.log_artifact(f"{exp_folder}/recall_curves.png")
-        
-        # Plot feature importance
-        print("Generating feature importance plot...")
-        importance_df = plot_feature_importance(model, features, 
-                                                f"{exp_folder}/feature_importance.png")
-        mlflow.log_artifact(f"{exp_folder}/feature_importance.png")
-        importance_df.to_csv(f"{exp_folder}/feature_importance.csv", index=False)
-        mlflow.log_artifact(f"{exp_folder}/feature_importance.csv")
-        
         # Evaluate on training set
-        y_train_pred = model.predict(X_train)
-        y_train_proba = model.predict_proba(X_train)[:, 1]
+        y_train_pred = model.predict(X_train_scaled)
+        y_train_proba = model.predict_proba(X_train_scaled)[:, 1]
         train_metrics = evaluate_model(y_train, y_train_pred, "Training")
         mlflow.log_metric("train_accuracy", train_metrics["accuracy"])
         mlflow.log_metric("train_precision", train_metrics["precision"])
         mlflow.log_metric("train_recall", train_metrics["recall"])
         mlflow.log_metric("train_f1", train_metrics["f1"])
-        
-        # Confusion matrix for training
         plot_confusion_matrix(y_train, y_train_pred, 
                             f"{exp_folder}/confusion_matrix_train.png", "Training")
         mlflow.log_artifact(f"{exp_folder}/confusion_matrix_train.png")
         
         # PR and ROC curves for training
-        train_pr_auc = plot_pr_curve(y_train, y_train_proba, 
+        train_pr_auc_score = plot_pr_curve(y_train, y_train_proba, 
                                      f"{exp_folder}/pr_curve_train.png", "Training")
         mlflow.log_artifact(f"{exp_folder}/pr_curve_train.png")
-        mlflow.log_metric("train_pr_auc", train_pr_auc)
+        mlflow.log_metric("train_pr_auc", train_pr_auc_score)
         
-        train_roc_auc = plot_roc_curve(y_train, y_train_proba, 
+        train_roc_auc_score = plot_roc_curve(y_train, y_train_proba, 
                                        f"{exp_folder}/roc_curve_train.png", "Training")
         mlflow.log_artifact(f"{exp_folder}/roc_curve_train.png")
-        mlflow.log_metric("train_roc_auc", train_roc_auc)
+        mlflow.log_metric("train_roc_auc", train_roc_auc_score)
         
         # Evaluate on validation set
-        y_valid_pred = model.predict(X_valid)
-        y_valid_proba = model.predict_proba(X_valid)[:, 1]
+        y_valid_pred = model.predict(X_valid_scaled)
+        y_valid_proba = model.predict_proba(X_valid_scaled)[:, 1]
         valid_metrics = evaluate_model(y_valid, y_valid_pred, "Validation")
-        mlflow.log_metric("valid_accuracy", valid_metrics["accuracy"])
-        mlflow.log_metric("valid_precision", valid_metrics["precision"])
-        mlflow.log_metric("valid_recall", valid_metrics["recall"])
-        mlflow.log_metric("valid_f1", valid_metrics["f1"])
-        
-        # Confusion matrix for validation
         plot_confusion_matrix(y_valid, y_valid_pred, 
                             f"{exp_folder}/confusion_matrix_valid.png", "Validation")
         mlflow.log_artifact(f"{exp_folder}/confusion_matrix_valid.png")
@@ -222,23 +158,31 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
         mlflow.log_artifact(f"{exp_folder}/roc_curve_valid.png")
         mlflow.log_metric("valid_roc_auc", valid_roc_auc)
         
-        # Log best iteration
-        mlflow.log_metric("best_iteration", model.best_iteration_)
+        # Save coefficients (if model has them)
+        if hasattr(model, 'coef_'):
+            coefficients_df = pd.DataFrame({
+                "feature": features,
+                "coefficient": model.coef_[0]
+            })
+            coefficients_df = coefficients_df.sort_values("coefficient", key=abs, ascending=False)
+            coefficients_df.to_csv(f"{exp_folder}/coefficients.csv", index=False)
+            mlflow.log_artifact(f"{exp_folder}/coefficients.csv")
+            print("\nFeature Coefficients (sorted by importance):")
+            print(coefficients_df.to_string(index=False))
         
-        # Print feature importance
-        print("\nFeature Importance (sorted):")
-        print(importance_df.sort_values("importance", ascending=False).to_string(index=False))
+        mlflow.log_metric("valid_accuracy", valid_metrics["accuracy"])
+        mlflow.log_metric("valid_precision", valid_metrics["precision"])
+        mlflow.log_metric("valid_recall", valid_metrics["recall"])
+        mlflow.log_metric("valid_f1", valid_metrics["f1"])
         
         # Save experiment config and results
         experiment_results = {
             "experiment_name": experiment_name,
             "timestamp": timestamp,
             "data_path": data_path,
-            "model_type": "LightGBM",
             "hyperparams": hyperparams,
             "features": features,
             "data_splits": data_loader.get_split_sizes(),
-            "best_iteration": model.best_iteration_,
             "train_metrics": train_metrics,
             "valid_metrics": valid_metrics
         }
@@ -248,13 +192,6 @@ def run_lgbm_experiment(data_path, hyperparams, experiment_name):
         mlflow.log_artifact(f"{exp_folder}/experiment_results.json")
         
         print(f"\nExperiment results saved to {exp_folder}/experiment_results.json")
-        
-        return {
-            "exp_folder": exp_folder,
-            "train_metrics": train_metrics,
-            "valid_metrics": valid_metrics,
-            "best_iteration": model.best_iteration_
-        }
 
 
 # ============ Main ============
@@ -263,28 +200,23 @@ if __name__ == "__main__":
     
     # Define experiment config
     data_path = "data/training_data_features_imputed.csv"
-    experiment_name = "notification_lgbm"
-    
+    experiment_name = "notification_logreg"
+
     hyperparams = {
-        "objective": "binary",
-        "n_estimators": 200,
-        "learning_rate": 0.05,
-        "max_depth": 6,
-        "num_leaves": 31,
-        "class_weight": "balanced",
-        "verbose": -1,
-        "early_stopping_rounds": 20
+        "penalty": "l1",
+        "solver": "saga" if hyperparams["penalty"] == "l1" else "lbfgs",
+        "max_iter": 1000,
+        "class_weight": "balanced"
     }
     
     # Run experiment
-    results = run_lgbm_experiment(
+    run_experiment(
         data_path=data_path,
+        model_class=LogisticRegression,
         hyperparams=hyperparams,
         experiment_name=experiment_name
     )
     
     print("\n" + "="*50)
-    print("LightGBM Experiment Complete!")
-    if results:
-        print(f"Results saved to: {results['exp_folder']}")
-        print(f"Best iteration: {results['best_iteration']}")
+    print("Experiment Complete!")
+    print(f"Results saved to: experiments/{experiment_name}")

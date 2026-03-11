@@ -255,7 +255,7 @@ def decide_notification(model, scaler, user_id, feature_store,
 if __name__ == "__main__":
 
     from sklearn.preprocessing import StandardScaler
-    from models import load_data, get_feature_columns, time_based_split
+    from training.data_utils import load_data, get_feature_columns
     
     print("="*60)
     print("Notification Decision Engine")

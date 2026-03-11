@@ -8,12 +8,12 @@ from sklearn.metrics import f1_score
 import mlflow
 
 # Import from utility modules
-from data_utils import DataLoader, evaluate_model, get_dvc_hash
-from viz_utils import (
+from training.data_utils import DataLoader, evaluate_model, get_dvc_hash
+from viz.viz_utils import (
     plot_confusion_matrix, plot_pr_curve, plot_roc_curve,
     plot_learning_curve, plot_coefficients
 )
-from analysis_utils import export_confusion_matrix_splits
+from viz.analysis_utils import export_confusion_matrix_splits
 
 
 DATA_PATH = "data/training_data_features_imputed.csv"

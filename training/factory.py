@@ -4,8 +4,8 @@ Factory for creating the appropriate training pipeline based on model type.
 
 from __future__ import annotations
 
-from pipelines import LightGBMPipeline, LogisticRegressionPipeline, TrainingPipeline, XGBoostPipeline
-from strategies import LightGBMStrategy, LogisticRegressionStrategy, XGBoostStrategy
+from .pipelines import LightGBMPipeline, LogisticRegressionPipeline, TrainingPipeline, XGBoostPipeline
+from .strategies import LightGBMStrategy, LogisticRegressionStrategy, XGBoostStrategy
 
 
 class TrainerFactory:

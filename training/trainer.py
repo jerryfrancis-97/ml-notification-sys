@@ -19,8 +19,8 @@ import warnings
 
 from dotenv import load_dotenv
 
-from config_utils import load_config
-from factory import TrainerFactory
+from config.config_utils import load_config
+from .factory import TrainerFactory
 
 
 warnings.filterwarnings("ignore")

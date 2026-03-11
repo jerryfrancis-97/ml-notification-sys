@@ -1,4 +1,4 @@
-!#usr/bin/bash
+#!/usr/bin/env bash
 
-python3 simulator.py
-python3 generate_logs.py
+python3 -m data_pipeline.simulator
+python3 -m data_pipeline.generate_logs
