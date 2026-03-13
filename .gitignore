@@ -11,3 +11,5 @@ data/logs/send_logs.csv
 data_old/*
 data_pipeline/__pycache__/*.pyc
 tests/__pycache__/*.pyc
+logs/*
+dags/__pycache__/*
