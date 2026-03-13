@@ -1,0 +1,37 @@
+services:
+  notification_db:
+    image: postgres:15
+    environment:
+    - POSTGRES_USER=admin
+    - POSTGRES_PASSWORD=pypass
+    - POSTGRES_DB=notification_db
+    ports:
+    - "5432:5432"
+    volumes:
+    - postgres_data:/var/lib/postgresql/data
+
+  airflow_orchestator:
+    build: .
+    environment:
+    - DB_HOST=notification_db
+    - DB_USER=admin
+    - DB_PASSWORD=pypass
+    - DB_NAME=notification_db
+    volumes:
+    - .:/app
+    depends_on:
+    - notification_db
+    command: tail -f /dev/null
+  
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+    - PGADMIN_DEFAULT_EMAIL=admin@admin.com
+    - PGADMIN_DEFAULT_PASSWORD=admin
+    ports:
+    - "8081:80"
+    depends_on:
+    - notification_db
+
+volumes:
+  postgres_data:
