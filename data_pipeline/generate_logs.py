@@ -4,6 +4,7 @@ import random
 import os
 import json
 from collections import defaultdict
+from datetime import timedelta
 
 
 class ControlPolicy:
@@ -91,16 +92,19 @@ class LogGenerator:
     Generates realistic send and response logs for notification ML training
     """
 
-    def __init__(self, user_data_path, logs_path, num_days=30, policy='weighted_random'):
+    def __init__(self, user_data_path, logs_path, num_days=30, policy='weighted_random',
+                 start_date="2025-01-01", open_cutoff_minutes=480):
         self.logs_path = logs_path
         self.user_data = pd.read_csv(user_data_path)
         # Parse hourly_weights from JSON string
         self.user_data['hourly_weights'] = self.user_data['hourly_weights'].apply(json.loads)
-        
+
         self.num_days = num_days
         self.policy = policy
+        self.start_date = pd.Timestamp(start_date)
+        self.open_cutoff_minutes = open_cutoff_minutes
         self.history = UserHistory()
-        
+
         self._generate_logs()
         self.save_logs()
 
@@ -162,13 +166,13 @@ class LogGenerator:
                 user_id = user_row['name']
                 hour = self._get_send_hour()
                 event_id = f"{user_id}_day{day}_h{hour}"
-                
-                # Calculate context features
-                notifications_24h = self.history.get_notifications_last_24h(user_id, day, hour)
-                hours_since_last = self.history.get_hours_since_last_notification(user_id, day, hour)
-                opens_last_7_days = self.history.get_opens_last_7_days(user_id, day)
-                total_notifications = self.history.get_total_notifications(user_id)
-                
+
+                # Derive send_timestamp with sub-hour jitter
+                random_minute = random.randint(0, 59)
+                send_timestamp = self.start_date + timedelta(
+                    days=day, hours=hour, minutes=random_minute
+                )
+
                 # Send log entry
                 send_logs.append({
                     "event_id": event_id,
@@ -177,32 +181,35 @@ class LogGenerator:
                     "hour": hour,
                     "day_of_week": day_of_week,
                     "is_weekend": int(is_weekend),
-                    # "hours_since_last": hours_since_last if hours_since_last is not None else -1,
-                    # "notifications_24h": notifications_24h
+                    "send_timestamp": send_timestamp,
                 })
-                
+
                 # Calculate open probability and determine outcome
                 open_prob = self._calculate_open_probability(user_row, hour, day, is_weekend)
-                opened = random.random() < open_prob
-                
-                # Simulate response delay (in minutes) - only if opened
-                if opened:
+                engaged = random.random() < open_prob
+
+                if engaged:
                     # Response delay follows log-normal distribution
-                    # Most opens happen quickly, some take longer
                     response_delay = int(np.random.lognormal(mean=2, sigma=1.5))
                     response_delay = min(response_delay, 1440)  # Cap at 24 hours
+                    opened = 1 if response_delay <= self.open_cutoff_minutes else 0
+                    open_timestamp = (
+                        send_timestamp + timedelta(minutes=response_delay)
+                        if opened else pd.NaT
+                    )
                 else:
-                    response_delay = -1  # Not opened
-                
+                    response_delay = -1
+                    opened = 0
+                    open_timestamp = pd.NaT
+
                 # Response log entry
                 response_logs.append({
                     "event_id": event_id,
                     "opened": int(opened),
-                    # "opens_last_7_days": opens_last_7_days,
-                    # "total_notifications": total_notifications,
-                    # "response_delay_minutes": response_delay
+                    "response_delay_minutes": response_delay,
+                    "open_timestamp": open_timestamp,
                 })
-                
+
                 # Update history AFTER generating the log
                 self.history.record_notification(user_id, day, hour, opened)
         
@@ -227,11 +234,9 @@ class LogGenerator:
 if __name__ == "__main__":
     user_data_path = "data/user_data.csv"
     logs_path = "data/logs"
-    
-    # Generate logs with weighted random policy for good training coverage
+
     log_generator = LogGenerator(
-        user_data_path, 
-        logs_path, 
-        num_days=30,
-        policy='weighted_random'
+        user_data_path, logs_path,
+        num_days=30, policy='weighted_random',
+        start_date="2025-01-01", open_cutoff_minutes=480
     )

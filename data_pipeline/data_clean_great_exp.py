@@ -48,6 +48,12 @@ def check_data_clean_quality():
     suite.add_expectation(gx.expectations.ExpectColumnValuesToBeInSet(column="is_weekend", value_set=[0, 1]))
     suite.add_expectation(gx.expectations.ExpectColumnValuesToBeBetween(column="hour", min_value=0, max_value=23))
     suite.add_expectation(gx.expectations.ExpectColumnValuesToBeInSet(column="opened", value_set=[0, 1]))
+    suite.add_expectation(gx.expectations.ExpectColumnValuesToNotBeNull(column="send_timestamp"))
+    suite.add_expectation(
+        gx.expectations.ExpectColumnValuesToBeBetween(
+            column="response_delay_minutes", min_value=-1, max_value=1440
+        )
+    )
 
     # Check if suite already exists in context; if so, use it, otherwise add new
     try:

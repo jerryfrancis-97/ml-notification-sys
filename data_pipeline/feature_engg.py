@@ -145,9 +145,8 @@ def feature_engineering_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     """
     feature_engineering = FeatureEngineering()
 
-    df["timestamp"] = pd.to_datetime(datetime.now())  \
-        + pd.to_timedelta(df["day"], unit="D") \
-        + pd.to_timedelta(df["hour"], unit='h')
+    df["timestamp"] = pd.to_datetime(df["send_timestamp"])
+    df = df.drop(columns=["send_timestamp", "open_timestamp", "response_delay_minutes"], errors="ignore")
     df.set_index("timestamp", inplace=True)
     df.sort_values(by=["user_id", "timestamp"], inplace=True)
 

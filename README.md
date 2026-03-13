@@ -68,7 +68,7 @@ source ml_notifi_env/bin/activate  # Linux/Mac
 # or: ml_notifi_env\Scripts\activate  # Windows
 
 # Install dependencies
-pip install pandas numpy scikit-learn mlflow matplotlib seaborn great_expectations python-dotenv
+pip install pandas numpy scikit-learn mlflow matplotlib seaborn great_expectations python-dotenv pytest
 
 # Start MLflow server (optional, for experiment tracking)
 mlflow server --host 0.0.0.0 --port 5000
@@ -98,6 +98,13 @@ python -m hpo.tune_lgbm      # LightGBM HPO
 python -m inference.decision_engine
 ```
 
+## Testing
+
+Run unit tests with pytest:
+
+```bash
+pytest tests/ -v
+```
 
 ## Data Versioning with DVC
 

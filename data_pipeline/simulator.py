@@ -109,8 +109,9 @@ class Simulation:
     """
     Simulates the users
     """
-    def __init__(self, num_users):
+    def __init__(self, num_users, output_dir="data"):
         self.users = []
+        self.output_dir = output_dir
         for i in range(num_users):
             user = User(i+1).define_user()
             self.users.append(user)
@@ -128,20 +129,22 @@ class Simulation:
             "hourly_weights": json.dumps(user.hourly_weights)  # Store as JSON string
         } for user in self.users])
 
-        os.makedirs("data", exist_ok=True)
-        user_df.to_csv("data/user_data.csv", index=False)
+        os.makedirs(self.output_dir, exist_ok=True)
+        user_df.to_csv(os.path.join(self.output_dir, "user_data.csv"), index=False)
 
     @staticmethod
-    def load_user_data():
+    def load_user_data(path=None):
         """
         Loads the user's data from a CSV file
         """
-        df = pd.read_csv("data/user_data.csv")
+        if path is None:
+            path = os.path.join("data", "user_data.csv")
+        df = pd.read_csv(path)
         # Parse hourly_weights back from JSON
         df['hourly_weights'] = df['hourly_weights'].apply(json.loads)
         return df
 
 
 if __name__ == "__main__":
-    simulation = Simulation(100)
+    simulation = Simulation(100, output_dir="data")
     print("Generated 100 users with realistic hourly engagement curves")
