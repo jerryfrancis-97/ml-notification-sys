@@ -3,6 +3,10 @@ mlruns/
 experiments/
 .env
 mlflow.db
+airflow.cfg
+airflow.db
+simple_auth_manager_passwords.json.generated
+webserver_config.py
 __pycache__/*
 mlartifacts/
 data/logs/response_logs.csv
