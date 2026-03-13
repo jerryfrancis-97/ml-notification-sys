@@ -1,0 +1,12 @@
+my_notification_dbt:
+  outputs:
+    dev:
+      type: postgres
+      host: notification_db
+      user: admin
+      password: pypass
+      port: 5432
+      dbname: notification_db
+      schema: analytics          # dbt builds tables here, public is used by raw data, so we dont want to mix that
+      threads: 1
+  target: dev
