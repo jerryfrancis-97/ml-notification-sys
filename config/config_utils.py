@@ -26,7 +26,10 @@ def detect_feature_columns(df: pd.DataFrame) -> Tuple[List[str], List[str]]:
     Returns:
         tuple: (feature_columns, impute_columns)
     """
-    exclude_cols = {"user_id", "opened", "timestamp", "time_bucket", "day", "hour"}
+    exclude_cols = {
+        "user_id", "opened", "timestamp", "time_bucket", "day", "hour",
+        "send_timestamp", "open_timestamp", "response_delay_minutes",
+    }
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     feature_columns = [col for col in numeric_cols if col not in exclude_cols]
 
