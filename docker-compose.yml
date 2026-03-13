@@ -12,16 +12,30 @@ services:
 
   airflow_orchestator:
     build: .
+    ports:
+    - "8080:8080"
     environment:
     - DB_HOST=notification_db
     - DB_USER=admin
     - DB_PASSWORD=pypass
     - DB_NAME=notification_db
-    volumes:
-    - .:/app
+    # airflow connections
+    - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://admin:pypass@notification_db/notification_db
+    - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+    - AIRFLOW__CORE__LOAD_EXAMPLES=False
+    - AIRFLOW__CORE__DAGS_FOLDER=/app/dags
+    - AIRFLOW_HOME=/app
     depends_on:
     - notification_db
-    command: tail -f /dev/null
+    command: >
+      bash -c "
+      echo 'Waiting for postgres...' &&
+      sleep 5 &&
+      airflow db migrate &&
+      airflow standalone" 
+    volumes:  
+    - .:/app
+    # in prod envs, we make webserver and scehduler separate
   
   pgadmin:
     image: dpage/pgadmin4
