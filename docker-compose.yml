@@ -32,6 +32,9 @@ services:
     - "8081:80"
     depends_on:
     - notification_db
+    volumes:
+    - pgadmin_data:/var/lib/pgadmin
 
 volumes:
   postgres_data:
+  pgadmin_data:
