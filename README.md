@@ -161,3 +161,34 @@ git checkout <commit-hash>
 # Pull the corresponding data version
 dvc checkout
 ```
+
+```mermaid
+graph TD
+    subgraph "External Sources"
+        S[Simulator / Logs] -->|CSV| B_In[Raw Ingestion]
+    end
+
+    subgraph "Airflow 3 (Orchestrator)"
+        direction TB
+        T1[Run Simulator] --> T2[Great Expectations Check]
+        T2 --> T3[dbt build: Bronze to Silver]
+        T3 --> T4[dbt build: Silver to Gold]
+        T4 --> T5[Export Training Set]
+    end
+
+    subgraph "Postgres (Medallion DB)"
+        direction LR
+        Bronze[(Bronze: Raw Tables)] --> Silver[(Silver: Cleaned/Staged)]
+        Silver --> Gold[(Gold: Feature Store)]
+    end
+
+    subgraph "ML Ops / Data Science"
+        T5 -->|CSV Export| DVC[DVC Tracking]
+        DVC --> Model[Model Training / Inference]
+    end
+
+    %% Connections
+    B_In -.-> Bronze
+    T3 -.-> Silver
+    T4 -.-> Gold
+```
